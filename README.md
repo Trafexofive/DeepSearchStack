@@ -1,7 +1,3 @@
-Of course. Here is a comprehensive, well-documented, and showcase-ready `README.md` file for your DeepSearchStack project.
-
-This README is designed to be the definitive entry point for new users and contributors. It explains the "why," the "what," and the "how" of the project, complete with an architecture diagram, a live demo showcase, and detailed instructions for setup, configuration, and usage.
-
 ---
 
 # DeepSearchStack: Your Private, Self-Hosted AI Search and Reasoning Engine
