@@ -1,4 +1,4 @@
----
+
 
 # DeepSearchStack: Your Private, Self-Hosted AI Search and Reasoning Engine
 
