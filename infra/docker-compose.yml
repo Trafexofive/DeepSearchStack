@@ -1,0 +1,197 @@
+# ======================================================================================
+# DeepSearchStack - Definitive Docker Compose Configuration
+# Version: 10.0 (The Final Command)
+# ======================================================================================
+
+volumes:
+  postgres_data:
+  yacy_data:
+  ollama_data:
+    name: deepsearch_ollama_data
+  redis_data:
+
+networks:
+  deepsearch_net:
+    driver: bridge
+    name: deepsearch_net
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-searchdb}
+      - POSTGRES_USER=${POSTGRES_USER:-searchuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-searchpass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    # This now builds your custom, working Ollama service
+    build:
+      context: ..
+      dockerfile: services/ollama-custom/Dockerfile
+    container_name: ollama-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    volumes:
+      - ollama_data:/root/.ollama
+    env_file: ../.env
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      # Pass the models to your entrypoint.sh script
+      # Pass the models to your entrypoint.sh script, using the same variable name as .env.example
+      - OLLAMA_MODELS_PULL=${OLLAMA_MODELS_PULL}
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 25
+      start_period: 30s
+
+  llm-gateway:
+    build:
+      context: ..
+      dockerfile: services/llm_gateway/Dockerfile
+    container_name: llm-gateway-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      ollama:
+        condition: service_healthy
+    env_file: ../.env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  search-agent:
+    build:
+      context: ..
+      dockerfile: services/search-agent/Dockerfile
+    container_name: search-agent-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      llm-gateway:
+        condition: service_healthy
+    env_file: ../.env
+    environment:
+      - LLM_GATEWAY_URL=http://llm-gateway:8080
+      - YACY_URL=http://yacy:8090
+      - WHOOGLE_URL=http://whoogle:5000
+      - SEARXNG_URL=http://searxng:8080
+
+  web-api:
+    build:
+      context: ..
+      dockerfile: services/web-api/Dockerfile
+    container_name: web-api-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      - search-agent
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: services/frontend/Dockerfile
+    container_name: frontend-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    ports:
+      - "3000:3000"
+
+  reverse-proxy:
+    build:
+      context: ..
+      dockerfile: services/reverse-proxy/Dockerfile
+    container_name: reverse-proxy-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    ports:
+      - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:80:80"
+    depends_on:
+      - frontend
+      - web-api
+
+  # --- Utility Services ---
+  vector-store:
+    build:
+      context: ..
+      dockerfile: services/vector-store/Dockerfile
+    container_name: vector-store-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+
+  crawler:
+    build:
+      context: ..
+      dockerfile: services/crawler/Dockerfile
+    container_name: crawler-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+
+  # --- Search Backends ---
+  yacy:
+    image: yacy/yacy_search_server:latest
+    container_name: yacy-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    volumes:
+      - yacy_data:/opt/yacy_search_server/DATA
+
+  whoogle:
+    image: benbusby/whoogle-search:latest
+    container_name: whoogle-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    volumes:
+      - ../services/searxng/settings.yml:/etc/searxng/settings.yml
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE]
+

@@ -1,0 +1,30 @@
+# ======================================================================================
+# DeepSearchStack - Integration Test Runner Configuration
+#
+# This file defines ONLY the test runner service. It is designed to be run
+# after the main stack (from docker-compose.yml) is already up.
+# ======================================================================================
+version: '3.8'
+
+services:
+  integration-tester:
+    build:
+      context: ..
+      dockerfile: testing/Dockerfile
+    container_name: integration-tester-1
+    # Connects to the external network created by the main docker-compose.yml
+    networks:
+      - deepsearch_net
+    # Pass environment variables from the .env file to the test container
+    env_file:
+      - ../.env
+    environment:
+      # The base URL for the tests, pointing to the reverse proxy service name
+      - LLM_GATEWAY_URL=http://reverse-proxy/llm
+    command: ["wait-for-it.sh", "reverse-proxy", "--", "python3", "/app/examples/query_llm.py"]
+
+networks:
+  deepsearch_net:
+    # This tells Docker Compose to connect to a pre-existing network
+    # with this name, instead of trying to create a new one.
+    external: true

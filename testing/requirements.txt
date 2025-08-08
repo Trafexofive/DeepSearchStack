@@ -1,0 +1,5 @@
+pytest
+httpx==0.25.0
+pytest-asyncio
+python-dotenv
+pytest-dependency
