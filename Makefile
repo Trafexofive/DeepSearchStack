@@ -17,7 +17,7 @@ COMPOSE := docker compose -p deepsearch -f $(COMPOSE_FILE)
 .DEFAULT_GOAL := help
 
 # --- Phony Targets ---
-.PHONY: help up down logs ps build no-cache restart re config status clean fclean prune stop ssh
+.PHONY: help up down logs ps build no-cache restart re config status clean fclean prune stop ssh orchestrator-spawn orchestrator-prune orchestrator-status test-suite test-orchestrator
 
 # ======================================================================================
 # HELP & USAGE
@@ -40,6 +40,15 @@ help:
 	@echo -e "  logs [service=<name>]   - Follow logs (all or specific service)."
 	@echo -e "  ssh service=<name>    - Get an interactive shell into a running service."
 	@echo -e "  exec svc=<name> args=\"<cmd>\" - Execute a command in a running service."
+	@echo ""
+	@echo -e "$(GREEN)Ollama Orchestrator Management:$(NC)"
+	@echo -e "  orchestrator-spawn        - Request the orchestrator to spawn a new worker."
+	@echo -e "  orchestrator-prune        - Request the orchestrator to prune all workers."
+	@echo -e "  orchestrator-status       - View the status of the worker fleet."
+	@echo ""
+	@echo -e "$(GREEN)Testing & Validation:$(NC)"
+	@echo -e "  test-suite                - Runs the main DeepSearchStack integration test suite."
+	@echo -e "  test-orchestrator         - Runs the specific test suite for the Ollama orchestrator."
 	@echo ""
 	@echo -e "$(GREEN)Cleaning & Pruning:$(NC)"
 	@echo -e "  fclean              - Stop and remove all services, volumes, and networks."
@@ -77,6 +86,18 @@ no-cache:
 	@$(COMPOSE) build --no-cache $(service)
 
 # ======================================================================================
+# TESTING & VALIDATION
+# ======================================================================================
+
+test-suite:
+	@echo -e "$(PURPLE)Running DeepSearchStack main integration test suite...$(NC)"
+	@./scripts/test_suite.sh
+
+test-orchestrator:
+	@echo -e "$(PURPLE)Running Chimera orchestrator specific test suite...$(NC)"
+	@cd services/ollama-api-server-docker && ./tests/test_orchestrator.sh
+
+# ======================================================================================
 # INFORMATION & DEBUGGING
 # ======================================================================================
 status:
@@ -105,10 +126,29 @@ exec:
 	@$(COMPOSE) exec $(svc) $(args)
 
 # ======================================================================================
+# OLLAMA ORCHESTRATOR MANAGEMENT
+# ======================================================================================
+orchestrator-spawn:
+	@echo -e "$(BLUE)Requesting orchestrator to spawn 1 new worker...$(NC)"
+	@curl -s -X POST http://localhost/orchestrator/admin/instances/spawn | jq .
+	@echo -e "$(GREEN)Request sent.$(NC)"
+
+orchestrator-prune:
+	@echo -e "$(RED)Requesting orchestrator to prune all workers...$(NC)"
+	@curl -s -X POST http://localhost/orchestrator/admin/instances/prune | jq .
+	@echo -e "$(GREEN)Request sent.$(NC)"
+
+orchestrator-status:
+	@echo -e "$(BLUE)Fetching orchestrator status...$(NC)"
+	@curl -s http://localhost/orchestrator/admin/instances | jq .
+
+# ======================================================================================
 # CLEANING & PRUNING
 # ======================================================================================
 fclean:
 	@echo -e "$(RED)Deep cleaning containers, networks, and volumes...$(NC)"
+	@echo -e "$(YELLOW)First, removing any orphaned worker containers...$(NC)"
+	-@for id in $(docker ps -a -q --filter "label=ollama-worker"); do docker stop $id && docker rm -f $id; done
 	@$(COMPOSE) down --volumes --remove-orphans
 
 prune: fclean
