@@ -87,6 +87,7 @@ graph TD
     LLMGateway --> GeminiAPI
     SearchAgent --> VectorStore
     SearchAgent --> Postgres
+```
 ---
 
 ## 🚀 Getting Started (Quick Start)
