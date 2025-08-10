@@ -1,9 +1,5 @@
 # ======================================================================================
-# DeepSearchStack - Definitive Docker Compose Configuration (Decoupled)
-# ======================================================================================
-
-# ======================================================================================
-# DeepSearchStack - Definitive Docker Compose Configuration (Orchestrator UI Focus)
+# DeepSearchStack - Definitive Docker Compose Configuration (Restored & Corrected)
 # ======================================================================================
 
 volumes:
@@ -20,21 +16,39 @@ networks:
     name: deepsearch_net
 
 services:
-  # --- PROXY ---
-  traefik:
-    image: "traefik:v2.10"
-    container_name: traefik-1
+  # --- CORE INFRASTRUCTURE ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-1
     restart: unless-stopped
-    command:
-      - "--configFile=/etc/traefik/config.yml"
-    ports:
-      - "80:80"
-      - "8080:8080" # Expose Traefik dashboard
-    volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "./config/traefik/config.yml:/etc/traefik/config.yml:ro"
     networks:
       - deepsearch_net
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-searchdb}
+      - POSTGRES_USER=${POSTGRES_USER:-searchuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-searchpass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # --- AI SERVICES ---
   ollama-orchestrator:
@@ -43,10 +57,6 @@ services:
       dockerfile: Dockerfile
     container_name: ollama-orchestrator-1
     restart: unless-stopped
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.ollama-orchestrator.rule=Host(`${TRAEFIK_API_DOMAIN}`)"
-      - "traefik.http.services.ollama-orchestrator.loadbalancer.server.port=8000"
     networks:
       - deepsearch_net
     volumes:
@@ -64,17 +74,92 @@ services:
       retries: 10
       start_period: 20s
 
-  # --- USER INTERFACE ---
+  llm-gateway:
+    build:
+      context: ../services/llm_gateway
+      dockerfile: Dockerfile
+    container_name: llm-gateway-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      ollama-orchestrator:
+        condition: service_healthy
+    env_file: ../.env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama-orchestrator:8000/api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  # --- CORE LOGIC (DECOUPLED) ---
+  search-gateway:
+    build:
+      context: ../services/search-gateway
+      dockerfile: Dockerfile
+    container_name: search-gateway-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: ../.env
+    environment:
+      - YACY_URL=http://yacy:8090
+      - WHOOGLE_URL=http://whoogle:5000
+      - SEARXNG_URL=http://searxng:8080
+
+  search-agent:
+    build:
+      context: ../services/search-agent
+      dockerfile: Dockerfile
+    container_name: search-agent-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      - llm-gateway
+    env_file: ../.env
+    environment:
+      - LLM_GATEWAY_URL=http://llm-gateway:8080
+
+  # --- USER INTERFACE & PROXY ---
+  web-api:
+    build:
+      context: ../services/web-api
+      dockerfile: Dockerfile
+    container_name: web-api-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      - search-agent
+      - llm-gateway
+      - search-gateway
+    environment:
+      - SEARCH_AGENT_URL=http://search-agent:8001
+      - LLM_GATEWAY_URL=http://llm-gateway:8080
+      - SEARCH_GATEWAY_URL=http://search-gateway:8002
+
+  frontend:
+    build:
+      context: ../services/frontend
+      dockerfile: Dockerfile
+    container_name: frontend-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+
   chimera-frontend:
     build:
       context: ../services/ollama-api-server-docker/src/chimera-frontend
       dockerfile: Dockerfile
     container_name: chimera-frontend-1
     restart: unless-stopped
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.chimera-frontend.rule=Host(`${TRAEFIK_FRONTEND_DOMAIN}`)"
-      - "traefik.http.services.chimera-frontend.loadbalancer.server.port=3000"
     networks:
       - deepsearch_net
     depends_on:
@@ -84,7 +169,22 @@ services:
     volumes:
       - chimera_db:/app/prisma
 
-  # --- SEARCH BACKENDS (can be removed if not needed for this phase) ---
+  reverse-proxy:
+    build:
+      context: ../services/reverse-proxy
+      dockerfile: Dockerfile
+    container_name: reverse-proxy-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    ports:
+      - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:80:80"
+    depends_on:
+      - frontend
+      - chimera-frontend
+      - web-api
+
+  # --- SEARCH BACKENDS ---
   yacy:
     image: yacy/yacy_search_server:latest
     container_name: yacy-1
@@ -120,5 +220,21 @@ services:
     cap_drop: [ALL]
     cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE]
 
+  # --- UTILITY & DATA SERVICES ---
+  vector-store:
+    build:
+      context: ../services/vector-store
+      dockerfile: Dockerfile
+    container_name: vector-store-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
 
-  
+  crawler:
+    build:
+      context: ../services/crawler
+      dockerfile: Dockerfile
+    container_name: crawler-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net

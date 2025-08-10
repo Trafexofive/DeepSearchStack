@@ -12,6 +12,7 @@ COPY . .
 # Environment variable to ensure Prisma generates the client in the correct location
 ENV NEXT_TELEMETRY_DISABLED 1
 RUN npx prisma generate
+RUN npx prisma db push
 RUN npm run build
 
 # Stage 3: Production image
