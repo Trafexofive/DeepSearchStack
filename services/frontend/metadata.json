@@ -1,0 +1,5 @@
+{
+  "name": "Deeps - AI Search Interface",
+  "description": "A vibrant and intuitive web interface to interact with the DeepSearchStack, providing AI-synthesized answers and cited sources from a private, self-hosted search and reasoning engine.",
+  "requestFramePermissions": []
+}

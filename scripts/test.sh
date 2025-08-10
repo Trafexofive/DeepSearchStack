@@ -154,3 +154,4 @@ echo -e "\n${GREEN}======================================================="
 echo -e "🎉 All tests passed successfully! The stack is fully operational. 🎉"
 echo -e "=======================================================${NC}\n"
 exit 0
+

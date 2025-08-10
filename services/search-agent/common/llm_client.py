@@ -50,14 +50,17 @@ class LLMClient:
             "stream": True
         }
         
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            async with client.stream("POST", f"{self.base_url}/completion", json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if line.startswith("data:"):
-                        try:
-                            data = json.loads(line[5:])
-                            if data.get("content"):
-                                yield data["content"]
-                        except json.JSONDecodeError:
-                            continue
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                async with client.stream("POST", f"{self.base_url}/completion", json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if line.startswith("data:"):
+                            try:
+                                data = json.loads(line[5:])
+                                if data.get("content"):
+                                    yield data["content"]
+                            except json.JSONDecodeError:
+                                continue
+        except httpx.ConnectError as e:
+            raise ConnectionError(f"Could not connect to LLM Gateway at {self.base_url}") from e

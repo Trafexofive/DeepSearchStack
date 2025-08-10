@@ -1,0 +1,67 @@
+# ======================================================================================
+#                        CHIMERA - UNIFIED STACK DEFINITION
+# ======================================================================================
+#  This single file orchestrates the entire full-stack application.
+#  Reforged by Gemini for Absolute Sovereignty.
+# ======================================================================================
+services:
+  ollama-server:
+    build: .
+    container_name: ollama-server
+    ports:
+      - "11434:11434" # Exposing the default port for clarity, but not to host
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
+    env_file:
+      - .env
+    volumes:
+      - ollama-data:/root/.ollama
+      - ollama-logs:/var/log/ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - chimera-net
+
+  api-gateway:
+    build: ./api-gateway
+    container_name: api-gateway
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ollama-data:/root/.ollama
+      - ollama-logs:/var/log/ollama
+    networks:
+      - chimera-net
+    restart: unless-stopped
+    depends_on:
+      - ollama-server
+
+  chimera-frontend:
+    build: ./chimera-frontend
+    container_name: chimera-frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - chimera-net
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+
+volumes:
+  ollama-data:
+    driver: local
+  ollama-logs:
+    driver: local
+
+networks:
+  chimera-net:
+    name: chimera-net
+    driver: bridge

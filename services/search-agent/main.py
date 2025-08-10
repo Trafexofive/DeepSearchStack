@@ -1,117 +1,77 @@
 #
-# services/search-agent/main.py
+# services/search-agent/main.py (Definitive Resilience Fix)
 #
 import os
-import time
 import httpx
 import asyncio
 import logging
 import json
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
-import redis.asyncio as redis
-import traceback
-from datetime import datetime
-from typing import List, Union, Dict
+from typing import List
 
-from common.models import *
-from utils.system_components import *
-from ranking.result_ranker import ResultRanker
-from providers.provider_manager import SearchProviderManager
-from common.llm_client import LLMClient, Message
+from .common.models import SynthesizeRequest, StreamingChunk, Message, SearchResult
+from .common.llm_client import LLMClient
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("search_agent")
+logger = logging.getLogger("synthesizer_agent")
 
-class SearchGateway:
-    def __init__(self, redis_client: redis.Redis):
+class SynthesizerAgent:
+    def __init__(self):
         self.llm_client = LLMClient()
-        self.provider_manager = SearchProviderManager(MetricsCollector(), CircuitBreaker(redis_client))
-        self.ranker = ResultRanker()
-        self.version = "2.5.2"
-        self.start_time = time.time()
+        self.version = "9.0.0"
 
-    async def _generate_streaming_response(self, query: str, context: str, sources: List[SearchResult], llm_provider: str | None):
+    async def _yield_synthesis_chunks(self, request: SynthesizeRequest, synthesis_provider: str):
+        """The 'happy path' generator. An exception here will be caught by the calling generator."""
+        context = "".join(f"Source [{i+1}]: {res.title}\nURL: {res.url}\nContent: {res.description}\n\n" for i, res in enumerate(request.sources))
         messages = [
-            Message(role="system", content="You are a helpful research assistant..."),
-            Message(role="user", content=f"User Query: {query}\n\nSearch Context:\n{context}")
+            Message(role="system", content="You are a world-class research assistant. Your sole purpose is to answer the user's query accurately and concisely based *only* on the provided search context. Synthesize the information from the sources into a coherent answer. Cite the sources using bracket notation, like [1], [2], etc., at the end of every sentence or claim that is supported by a source. If the provided context does not contain enough information to answer the query, you must state that you were unable to find a definitive answer."),
+            Message(role="user", content=f"User Query: {request.query}\n\nSearch Context:\n{context}")
         ]
+        
+        content_streamed = False
+        async for chunk in self.llm_client.get_streaming_completion(messages, provider=synthesis_provider):
+            content_streamed = True
+            yield f'data: {json.dumps(StreamingChunk(content=chunk, finished=False).dict())}\n\n'
+        
+        if not content_streamed:
+            raise ValueError("LLM provider returned an empty stream.")
+
+        yield f'data: {json.dumps(StreamingChunk(content="", finished=True, sources=request.sources).dict())}\n\n'
+
+    async def _generate_and_handle_stream(self, request: SynthesizeRequest):
+        """A single, robust generator that handles the entire process, including errors."""
+        synthesis_provider = request.llm_provider or "ollama"
         try:
-            async for chunk in self.llm_client.get_streaming_completion(messages=messages, provider=llm_provider):
-                yield f'data: {json.dumps(StreamingChunk(content=chunk, finished=False).dict())}\n\n'
-            
-            final_sources = [source.dict() for source in sources]
-            yield f'data: {json.dumps({"content": "", "finished": True, "sources": final_sources})}\n\n'
+            async for chunk in self._yield_synthesis_chunks(request, synthesis_provider):
+                yield chunk
         except Exception as e:
-            logger.error(f"Streaming error: {e}")
-            error_content = f"\nError during synthesis: {e}"
-            # FIX: Ensure sources are properly serialized to dicts before JSON dumping.
-            final_sources = [source.dict() for source in sources]
-            error_chunk = {"content": error_content, "finished": True, "sources": final_sources}
-            yield f'data: {json.dumps(error_chunk)}\n\n'
+            logger.error(f"A critical error occurred during synthesis stream: {e}")
+            error_content = "\n\n**Error during synthesis:** An issue occurred while generating the answer."
+            error_chunk = StreamingChunk(content=error_content, finished=True, sources=request.sources)
+            yield f'data: {json.dumps(error_chunk.dict())}\n\n'
 
-    async def search(self, request: SearchRequest) -> Union[GatewayResponse, StreamingResponse]:
-        start_time = time.time()
-        async with httpx.AsyncClient(timeout=request.timeout) as client:
-            tasks = [self.provider_manager.query_provider(client, p, request.query, request) for p in request.providers]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+    def synthesize(self, request: SynthesizeRequest) -> StreamingResponse:
+        """Prepares and returns the streaming response, handling cases with no sources."""
+        if not request.sources:
+            async def empty_streamer(answer: str):
+                yield f'data: {json.dumps(StreamingChunk(content=answer, finished=True, sources=[]).dict())}\n\n'
+            return StreamingResponse(empty_streamer("No sources provided to synthesize an answer."), media_type="text/event-stream")
         
-        all_results = [res for pres in results if isinstance(pres, list) for res in pres]
-        fused_results = self._fuse_and_deduplicate(all_results)
-        ranked_results = self.ranker.rank_results(request.query, fused_results, request.sort_by)
-        limited_results = ranked_results[:request.max_results]
-
-        if not limited_results:
-            answer = "No relevant information found."
-            if request.stream:
-                async def empty_stream(): yield f'data: {json.dumps({"content": answer, "finished": True, "sources": []})}\n\n'
-                return StreamingResponse(empty_stream(), media_type="text/event-stream")
-            return GatewayResponse(answer=answer, sources=[], execution_time=time.time() - start_time, query_time=datetime.now().isoformat(), search_providers_used=[p.value for p in request.providers], total_results_found=0)
-            
-        context = "".join(f"Source [{i+1}]: {res.title}\\nURL: {res.url}\\nContent: {res.description}\\n\\n" for i, res in enumerate(limited_results))
-        
-        if request.stream:
-            return StreamingResponse(self._generate_streaming_response(request.query, context, limited_results, request.llm_provider), media_type="text/event-stream")
-        
-        try:
-            messages = [Message(role="system", content="You are a research assistant..."), Message(role="user", content=f"Query: {request.query}\\nContext:\\n{context}")]
-            answer = await self.llm_client.get_completion(messages=messages, provider=request.llm_provider)
-            return GatewayResponse(answer=answer, sources=limited_results, execution_time=time.time() - start_time, query_time=datetime.now().isoformat(), search_providers_used=[p.value for p in request.providers], total_results_found=len(all_results))
-        except Exception as e:
-            logger.error(f"LLM error: {e}\\n{traceback.format_exc()}")
-            raise HTTPException(status_code=502, detail=f"Error synthesizing answer: {e}")
-
-    def _fuse_and_deduplicate(self, all_results: List[SearchResult]) -> List[SearchResult]:
-        unique_urls = {r.url: r for r in all_results if r.url}
-        return list(unique_urls.values())
+        return StreamingResponse(self._generate_and_handle_stream(request), media_type="text/event-stream")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    redis_client = redis.from_url(os.environ.get("REDIS_URL", "redis://redis:6379/0"))
-    app.state.search_gateway = SearchGateway(redis_client)
+    app.state.agent = SynthesizerAgent()
     yield
-    await redis_client.close()
 
-app = FastAPI(title="DeepSearch Agent", version="2.5.2", lifespan=lifespan)
+app = FastAPI(title="DeepSearch Synthesizer Agent", version="9.0.0", lifespan=lifespan)
 
-def get_gateway(request: Request) -> SearchGateway:
-    return request.app.state.search_gateway
-
-@app.post("/search", response_model=GatewayResponse, tags=["Search"])
-async def search_endpoint(request: SearchRequest, gateway: SearchGateway = Depends(get_gateway)):
-    request.stream = False
-    return await gateway.search(request)
-
-@app.post("/search/stream", tags=["Search"])
-async def search_stream_endpoint(request: SearchRequest, gateway: SearchGateway = Depends(get_gateway)):
-    request.stream = True
-    return await gateway.search(request)
+@app.post("/synthesize/stream")
+async def synthesize_stream_endpoint(request: SynthesizeRequest, agent: SynthesizerAgent = Depends(lambda: app.state.agent)):
+    return agent.synthesize(request)
     
-@app.get("/health", status_code=200, tags=["System"])
-async def health_check():
-    return {"status": "healthy", "version": "2.5.2"}
-
-@app.get("/providers", tags=["System"], response_model=Dict[str, Dict[str, str]])
-async def list_providers(gateway: SearchGateway = Depends(get_gateway)):
-    return {"providers": gateway.provider_manager.get_provider_status()}
+@app.get("/health")
+async def health(agent: SynthesizerAgent = Depends(lambda: app.state.agent)):
+    return {"status": "healthy", "version": agent.version}

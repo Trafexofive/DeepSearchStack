@@ -49,15 +49,22 @@ class OllamaProvider(LLMProvider):
             return False
 
     def _prepare_payload(self, request: CompletionRequest, stream: bool) -> dict:
+        """Correctly prepares the payload including all options."""
         if self._legacy_format:
-            prompt = "\n".join([f"{msg.role}: {msg.content}" for msg in request.messages])
+            prompt = "\n".join([f"{msg.content}" for msg in request.messages])
             payload = {"model": self.model_name, "prompt": prompt, "stream": stream}
         else:
             payload = {"model": self.model_name, "messages": [msg.dict() for msg in request.messages], "stream": stream}
         
-        if request.max_tokens:
-            payload.setdefault("options", {})["num_predict"] = request.max_tokens
-        payload["temperature"] = request.temperature
+        options = {}
+        if request.max_tokens is not None:
+            options["num_predict"] = request.max_tokens
+        if request.temperature is not None:
+            options["temperature"] = request.temperature
+        
+        if options:
+            payload["options"] = options
+            
         return payload
 
     async def get_completion(self, request: CompletionRequest) -> CompletionResponse:
@@ -78,11 +85,13 @@ class OllamaProvider(LLMProvider):
             async with client.stream("POST", f"{self.base_url}{self._endpoint}", json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
+                    logger.info(f"Ollama raw stream line: {line}")
                     try:
                         data = json.loads(line)
                         chunk = data.get("response") if self._legacy_format else data.get("message", {}).get("content", "")
                         if chunk:
                             yield chunk
                     except json.JSONDecodeError:
+                        logger.warning(f"Failed to decode JSON from line: {line}")
                         continue
 

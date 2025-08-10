@@ -18,6 +18,7 @@ class CompletionRequest(BaseModel):
     messages: List[Message]
     temperature: float = 0.7
     max_tokens: Optional[int] = None
+    stream: bool = False
 
 class CompletionResponse(BaseModel):
     content: str

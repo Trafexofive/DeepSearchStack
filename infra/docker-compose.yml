@@ -1,6 +1,5 @@
 # ======================================================================================
-# DeepSearchStack - Definitive Docker Compose Configuration
-# Version: 10.0 (The Final Command)
+# DeepSearchStack - Definitive Docker Compose Configuration (Decoupled)
 # ======================================================================================
 
 volumes:
@@ -16,6 +15,7 @@ networks:
     name: deepsearch_net
 
 services:
+  # --- CORE INFRASTRUCTURE ---
   postgres:
     image: postgres:15-alpine
     container_name: postgres-1
@@ -29,7 +29,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -49,29 +49,29 @@ services:
       timeout: 5s
       retries: 5
 
-  ollama:
-    # This now builds your custom, working Ollama service
+  # --- AI SERVICES ---
+  ollama-orchestrator:
     build:
       context: ..
-      dockerfile: services/ollama-custom/Dockerfile
-    container_name: ollama-1
+      dockerfile: services/ollama-api-server-docker/src/api-gateway/Dockerfile
+    container_name: ollama-orchestrator-1
     restart: unless-stopped
     networks:
       - deepsearch_net
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
       - ollama_data:/root/.ollama
     env_file: ../.env
     environment:
-      - OLLAMA_HOST=0.0.0.0
-      # Pass the models to your entrypoint.sh script
-      # Pass the models to your entrypoint.sh script, using the same variable name as .env.example
-      - OLLAMA_MODELS_PULL=${OLLAMA_MODELS_PULL}
+      - WORKER_IMAGE=${WORKER_IMAGE:-ollama/ollama:latest}
+      - OLLAMA_DEFAULT_MODEL=${OLLAMA_DEFAULT_MODEL:-gemma:2b}
+      - CHIMERA_NETWORK=deepsearch_net
     healthcheck:
-      test: ["CMD", "ollama", "list"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/admin/instances"]
       interval: 10s
-      timeout: 5s
-      retries: 25
-      start_period: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
 
   llm-gateway:
     build:
@@ -82,17 +82,35 @@ services:
     networks:
       - deepsearch_net
     depends_on:
-      ollama:
+      ollama-orchestrator:
         condition: service_healthy
     env_file: ../.env
     environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_BASE_URL=http://ollama-orchestrator:8000/api
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 20s
+
+  # --- CORE LOGIC (DECOUPLED) ---
+  search-gateway:
+    build:
+      context: ..
+      dockerfile: services/search-gateway/Dockerfile
+    container_name: search-gateway-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: ../.env
+    environment:
+      - YACY_URL=http://yacy:8090
+      - WHOOGLE_URL=http://whoogle:5000
+      - SEARXNG_URL=http://searxng:8080
 
   search-agent:
     build:
@@ -103,15 +121,12 @@ services:
     networks:
       - deepsearch_net
     depends_on:
-      llm-gateway:
-        condition: service_healthy
+      - llm-gateway
     env_file: ../.env
     environment:
       - LLM_GATEWAY_URL=http://llm-gateway:8080
-      - YACY_URL=http://yacy:8090
-      - WHOOGLE_URL=http://whoogle:5000
-      - SEARXNG_URL=http://searxng:8080
 
+  # --- USER INTERFACE & PROXY ---
   web-api:
     build:
       context: ..
@@ -122,6 +137,12 @@ services:
       - deepsearch_net
     depends_on:
       - search-agent
+      - llm-gateway
+      - search-gateway
+    environment:
+      - SEARCH_AGENT_URL=http://search-agent:8001
+      - LLM_GATEWAY_URL=http://llm-gateway:8080
+      - SEARCH_GATEWAY_URL=http://search-gateway:8002
 
   frontend:
     build:
@@ -131,8 +152,6 @@ services:
     restart: unless-stopped
     networks:
       - deepsearch_net
-    ports:
-      - "3000:3000"
 
   reverse-proxy:
     build:
@@ -148,7 +167,7 @@ services:
       - frontend
       - web-api
 
-  # --- Utility Services ---
+  # --- UTILITY & DATA SERVICES ---
   vector-store:
     build:
       context: ..
@@ -167,7 +186,7 @@ services:
     networks:
       - deepsearch_net
 
-  # --- Search Backends ---
+  # --- SEARCH BACKENDS ---
   yacy:
     image: yacy/yacy_search_server:latest
     container_name: yacy-1
@@ -176,6 +195,12 @@ services:
       - deepsearch_net
     volumes:
       - yacy_data:/opt/yacy_search_server/DATA
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/status.json"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
 
   whoogle:
     image: benbusby/whoogle-search:latest
@@ -183,6 +208,8 @@ services:
     restart: unless-stopped
     networks:
       - deepsearch_net
+    environment:
+      - WHOOGLE_CONFIG_GET_ONLY=1
 
   searxng:
     image: searxng/searxng:latest
@@ -194,4 +221,3 @@ services:
       - ../services/searxng/settings.yml:/etc/searxng/settings.yml
     cap_drop: [ALL]
     cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE]
-

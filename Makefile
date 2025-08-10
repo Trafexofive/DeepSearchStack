@@ -17,7 +17,7 @@ COMPOSE := docker compose -p deepsearch -f $(COMPOSE_FILE)
 .DEFAULT_GOAL := help
 
 # --- Phony Targets ---
-.PHONY: help up down logs ps build no-cache restart re config status clean fclean prune stop ssh ollama-pull
+.PHONY: help up down logs ps build no-cache restart re config status clean fclean prune stop ssh
 
 # ======================================================================================
 # HELP & USAGE
@@ -35,9 +35,6 @@ help:
 	@echo -e "  re                  - Rebuild images (cached) and restart all services."
 	@echo -e "  rere                - Rebuild images (no-cache) and restart all services."
 	@echo ""
-	@echo -e "$(GREEN)Model Management (Ollama):$(NC)"
-	@echo -e "  ollama-pull model=<name> - Pulls a new model into the running Ollama service."
-	@echo ""
 	@echo -e "$(GREEN)Information & Debugging:$(NC)"
 	@echo -e "  status [service=<name>] - Show status of services (Alias: ps)."
 	@echo -e "  logs [service=<name>]   - Follow logs (all or specific service)."
@@ -49,8 +46,7 @@ help:
 	@echo -e "  prune               - Ultimate clean: fclean + prune entire Docker system."
 	@echo ""
 	@echo -e "$(YELLOW)Execution Order:$(NC)"
-	@echo -e "  1. make up                       # Start stack. Default models are pulled on first run."
-	@echo -e "  2. make ollama-pull model=phi3   # Pull additional models to the running service."
+	@echo -e "  1. make up                       # Start stack. The default model is pulled automatically by workers."
 	@echo -e "$(BLUE)========================================================================="
 
 # ======================================================================================
@@ -68,18 +64,6 @@ down:
 restart: down up
 re: down build up logs
 rere: down no-cache up logs
-
-# ======================================================================================
-# MODEL MANAGEMENT
-# ======================================================================================
-ollama-pull:
-	@if [ -z "$(model)" ]; then \
-		echo -e "$(RED)Error: Model name required. Usage: make ollama-pull model=<name>$(NC)"; \
-		exit 1; \
-	fi
-	@echo -e "$(BLUE)Executing pull command in 'ollama-1' for model: $(model)...$(NC)"
-	@$(COMPOSE) exec ollama-1 ollama pull $(model)
-	@echo -e "$(GREEN)Pull command finished.$(NC)"
 
 # ======================================================================================
 # BUILDING IMAGES

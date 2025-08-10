@@ -1,33 +1,33 @@
-# Dockerfile for the Next.js frontend
-
-# 1. Build stage
+# Stage 1: Build the React application
 FROM node:18-alpine AS builder
+
 WORKDIR /app
 
-# Copy package.json and package-lock.json
+# CORRECTED: Copy both package.json AND package-lock.json
 COPY services/frontend/package*.json ./
 
-# Install dependencies
-RUN npm install
+# Now 'npm ci' will find the package-lock.json and succeed
+RUN npm ci
 
-# Copy the rest of the application code
+# Copy the rest of the application source code
 COPY services/frontend/ .
 
-# Build the Next.js application
+# Build the application for production
+# Assuming your build script is 'build' in package.json
 RUN npm run build
 
-# 2. Production stage
-FROM node:18-alpine
-WORKDIR /app
+# Stage 2: Serve the static files with Nginx
+FROM nginx:1.25-alpine
 
-# Copy the built application from the builder stage
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/public ./public
+# The build output is likely in a 'dist' or 'build' folder.
+# We'll assume 'dist' based on Vite's default.
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Expose the port the app runs on
-EXPOSE 3000
+# Copy the custom Nginx configuration
+COPY services/frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
-# Start the Next.js application
-CMD ["npm", "start"]
+# Expose port 80
+EXPOSE 80
+
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]

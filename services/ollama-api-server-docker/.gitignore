@@ -1,0 +1,22 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+
+# Docker
+ollama-data/
+ollama-logs/
+
+# IDE
+.vscode/
+.idea/
+
+# Other
+GEMINI.md
