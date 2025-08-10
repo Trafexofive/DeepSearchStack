@@ -90,3 +90,23 @@
         - `[ ]` 4.2.2: Use Mermaid.js syntax to draw an architecture diagram showing all services (including the new Redis and Vector Store).
         - `[ ]` 4.2.3: Update the `## Configuration` section to document the new environment variables: `ENABLE_GEMINI`, `ENABLE_GROQ`, and `OLLAMA_DEFAULT_MODEL`.
         - `[ ]` 4.2.4: Add a new section `## API Reference` with `curl` examples for the `/search`, `/completion`, and `/providers` endpoints.
+
+---
+
+### **EPIC 5: UI/UX - Integrate Chimera Frontend**
+- **Priority:** Low
+- **Est. Time:** 2 Days
+- **Description:** Replace the default simple frontend with the more advanced `chimera-frontend` from the `ollama-api-server-docker` repository. This provides a path to full user, auth, and API key management.
+
+- **Tasks:**
+    - **`[ ]` 5.1: Replace Nginx with Traefik**
+        - `[ ]` 5.1.1: Remove the `reverse-proxy` (Nginx) service from `infra/docker-compose.yml`.
+        - `[ ]` 5.1.2: Add and configure the `traefik` service.
+    - **`[ ]` 5.2: Integrate the Frontend Service**
+        - `[ ]` 5.2.1: Remove the existing `frontend` and `web-api` services.
+        - `[ ]` 5.2.2: Add the `chimera-frontend` service to `infra/docker-compose.yml`.
+        - `[ ]` 5.2.3: Configure environment variables (`NEXTAUTH_SECRET`, etc.) in `.env.example`.
+        - `[ ]` 5.2.4: Configure a persistent volume for the frontend's SQLite database.
+    - **`[ ]` 5.3: Connect Frontend to DeepSearch Services**
+        - `[ ]` 5.3.1: Modify the `chimera-frontend` application to make requests to the `search-agent` and `search-gateway`.
+        - `[ ]` 5.3.2: Implement UI components to display synthesized search results and sources.

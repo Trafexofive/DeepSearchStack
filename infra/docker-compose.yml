@@ -52,8 +52,8 @@ services:
   # --- AI SERVICES ---
   ollama-orchestrator:
     build:
-      context: ..
-      dockerfile: services/ollama-api-server-docker/src/api-gateway/Dockerfile
+      context: ../services/ollama-api-server-docker/src/api-gateway
+      dockerfile: Dockerfile
     container_name: ollama-orchestrator-1
     restart: unless-stopped
     networks:

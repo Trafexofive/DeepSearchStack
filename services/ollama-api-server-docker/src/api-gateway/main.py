@@ -24,7 +24,12 @@ CHIMERA_NETWORK = os.getenv("CHIMERA_NETWORK", "chimera-net")
 
 # --- Global State ---
 # In a production system, this state would be managed in a more persistent store like Redis.
-client = docker.from_env()
+try:
+    client = docker.from_env()
+except Exception as e:
+    logger.critical(f"FATAL: Could not connect to Docker socket. Ensure it's mounted correctly. Error: {e}")
+    # In a real scenario, you might want to exit or have a more robust fallback.
+    client = None
 http_client: httpx.AsyncClient = None
 workers = {}  # Stores worker_url -> container_name mapping
 worker_states = {}  # Stores worker_url -> "IDLE" | "BUSY" | "PENDING"

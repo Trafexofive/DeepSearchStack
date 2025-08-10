@@ -149,6 +149,9 @@ fclean:
 	@echo -e "$(RED)Deep cleaning containers, networks, and volumes...$(NC)"
 	@echo -e "$(YELLOW)First, removing any orphaned worker containers...$(NC)"
 	-@for id in $(docker ps -a -q --filter "label=ollama-worker"); do docker stop $id && docker rm -f $id; done
+	@echo -e "$(YELLOW)Second, removing any orphaned chimera containers...$(NC)"
+	-@docker compose -f services/ollama-api-server-docker/docker-compose.yml down --volumes --remove-orphans 2>/dev/null || true
+	@echo -e "$(YELLOW)Finally, taking down the main stack...$(NC)"
 	@$(COMPOSE) down --volumes --remove-orphans
 
 prune: fclean
