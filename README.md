@@ -208,6 +208,7 @@ Interested in contributing? Here's how to get started.
 ├── llm_gateway/             # The resilient, multi-provider LLM gateway
 ├── search-agent/            # Core agent logic for search and synthesis
 ├── vector-store/            # RAG-enabling vector database service
+├── crawler/                 # Web crawling service with crawl4ai
 ├── testing/                 # Pytest integration tests
 ├── examples/                # Example client scripts
 └── ... (other service directories)
@@ -231,6 +232,7 @@ Ensure the stack is running, then execute the test script:
 | **Vector Store**  | ChromaDB, Sentence-Transformers          |
 | **Metadata Store**| PostgreSQL                               |
 | **Search Engines**| Whoogle, SearXNG, YaCy                   |
+| **Web Crawling**  | crawl4ai, Playwright                     |
 | **Testing**       | Pytest, pytest-httpx                     |
 
 ## 🗺️ Roadmap

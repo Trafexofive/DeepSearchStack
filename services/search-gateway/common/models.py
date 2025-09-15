@@ -1,4 +1,3 @@
-
 #
 # services/search-gateway/common/models.py
 #

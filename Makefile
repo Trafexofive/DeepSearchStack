@@ -97,6 +97,10 @@ test-orchestrator:
 	@echo -e "$(PURPLE)Running Chimera orchestrator specific test suite...$(NC)"
 	@cd services/ollama-api-server-docker && ./tests/test_orchestrator.sh
 
+test-crawler:
+	@echo -e "$(PURPLE)Testing crawler service...$(NC)"
+	@python3 testing/test_crawler.py
+
 # ======================================================================================
 # INFORMATION & DEBUGGING
 # ======================================================================================

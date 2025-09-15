@@ -18,6 +18,7 @@ from .provider_base import LLMProvider, CompletionRequest, CompletionResponse, M
 from .providers.gemini_provider import GeminiProvider
 from .providers.groq_provider import GroqProvider
 from .providers.ollama_provider import OllamaProvider
+from .providers.github_models_provider import GitHubModelsProvider
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("llm_gateway")
@@ -42,6 +43,9 @@ async def startup_event():
     if os.getenv('ENABLE_GROQ', 'false').lower() == 'true' and os.getenv("GROQ_API_KEY"):
         providers["groq"] = GroqProvider()
         logger.info("Groq provider instance created.")
+    if os.getenv('ENABLE_GITHUB_MODELS', 'false').lower() == 'true' and os.getenv("GITHUB_TOKEN"):
+        providers["github_models"] = GitHubModelsProvider()
+        logger.info("GitHub Models provider instance created.")
     providers["ollama"] = OllamaProvider()
     logger.info("Ollama provider instance created.")
     logger.info(f"Startup complete. Configured providers: {list(providers.keys())}")

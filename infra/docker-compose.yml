@@ -238,3 +238,13 @@ services:
     restart: unless-stopped
     networks:
       - deepsearch_net
+    ports:
+      - "8003:8000"
+    environment:
+      - PORT=8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

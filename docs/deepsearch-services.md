@@ -45,6 +45,28 @@
 
 ### 1. API Gateway (C++/Rust Core)
 
+### 2. Crawler Service (Python)
+
+The crawler service is built using [crawl4ai](https://github.com/unclecode/crawl4ai), an open-source LLM-friendly web crawler and scraper. It provides the following capabilities:
+
+- Web page crawling with full JavaScript rendering support
+- Content extraction in multiple formats (HTML, Markdown, etc.)
+- LLM-based intelligent content extraction and structuring
+- CSS selector-based targeted extraction
+- RESTful API for easy integration with other services
+
+Key features:
+- Fast and efficient crawling using browser automation
+- Support for complex web applications and dynamic content
+- Structured data extraction using LLMs
+- Easy integration with the rest of the DeepSearchStack
+
+API Endpoints:
+- `POST /crawl` - Crawl a URL with configurable extraction strategies
+- `GET /health` - Health check endpoint
+
+The service is implemented in Python using FastAPI and integrates seamlessly with the Docker Compose stack.
+
 **Query Router & Orchestrator**
 ```cpp
 // gateway/query_router.hpp
@@ -568,7 +590,7 @@ public:
 deepsearch-stack/
 ├── gateway/           # C++ core gateway
 ├── backends/          # Backend implementations
-├── crawler/           # Document crawler
+├── crawler/           # Web crawling service with crawl4ai
 ├── local-index/       # Local search index
 ├── monitoring/        # Prometheus/Grafana configs
 ├── config/           # Configuration files
