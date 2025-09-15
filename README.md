@@ -1,8 +1,4 @@
-Of course. Here is a comprehensive, well-documented, and showcase-ready `README.md` file for your DeepSearchStack project.
 
-This README is designed to be the definitive entry point for new users and contributors. It explains the "why," the "what," and the "how" of the project, complete with an architecture diagram, a live demo showcase, and detailed instructions for setup, configuration, and usage.
-
----
 
 # DeepSearchStack: Your Private, Self-Hosted AI Search and Reasoning Engine
 
@@ -53,28 +49,28 @@ The stack is composed of several microservices that work in concert, providing a
 
 ```mermaid
 graph TD
-    subgraph User Interaction
+    subgraph User_Interaction
         CLI[CLI / API Client]
         WebApp[Web UI (web-api)]
     end
 
-    subgraph Core Logic
+    subgraph Core_Logic
         SearchAgent[Search Agent (search-agent)]
         LLMGateway[LLM API Gateway (llm-gateway)]
     end
 
-    subgraph AI & Data Services
+    subgraph AI_Data_Services
         Ollama[Ollama (Local LLM)]
         VectorStore[Vector Store (ChromaDB)]
         Postgres[PostgreSQL (Metadata)]
     end
 
-    subgraph External APIs
+    subgraph External_APIs
         GroqAPI[Groq Cloud API]
         GeminiAPI[Google Gemini API]
     end
     
-    subgraph Search Backends
+    subgraph Search_Backends
         Whoogle[Whoogle]
         SearXNG[SearXNG]
         YaCy[YaCy (P2P)]
@@ -82,17 +78,16 @@ graph TD
 
     CLI --> SearchAgent
     WebApp --> SearchAgent
-    SearchAgent -- "1. Federated Query" --> Whoogle
-    SearchAgent -- "1. Federated Query" --> SearXNG
-    SearchAgent -- "1. Federated Query" --> YaCy
-    SearchAgent -- "2. Synthesize Answer" --> LLMGateway
-    LLMGateway -- routes to --> Ollama
-    LLMGateway -- routes to --> GroqAPI
-    LLMGateway -- routes to --> GeminiAPI
-    SearchAgent -- Stores & Retrieves from --> VectorStore
-    SearchAgent -- Stores & Retrieves from --> Postgres
+    SearchAgent --> Whoogle
+    SearchAgent --> SearXNG
+    SearchAgent --> YaCy
+    SearchAgent --> LLMGateway
+    LLMGateway --> Ollama
+    LLMGateway --> GroqAPI
+    LLMGateway --> GeminiAPI
+    SearchAgent --> VectorStore
+    SearchAgent --> Postgres
 ```
-
 ---
 
 ## 🚀 Getting Started (Quick Start)
