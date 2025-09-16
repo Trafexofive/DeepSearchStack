@@ -49,6 +49,7 @@ help:
 	@echo -e "$(GREEN)Testing & Validation:$(NC)"
 	@echo -e "  test-suite                - Runs the main DeepSearchStack integration test suite."
 	@echo -e "  test-orchestrator         - Runs the specific test suite for the Ollama orchestrator."
+	@echo -e "  test-openwebui            - Runs the test suite for the OpenWebUI service."
 	@echo ""
 	@echo -e "$(GREEN)Cleaning & Pruning:$(NC)"
 	@echo -e "  fclean              - Stop and remove all services, volumes, and networks."
@@ -89,9 +90,7 @@ no-cache:
 # TESTING & VALIDATION
 # ======================================================================================
 
-test-suite:
-	@echo -e "$(PURPLE)Running DeepSearchStack main integration test suite...$(NC)"
-	@./scripts/test_suite.sh
+
 
 test-orchestrator:
 	@echo -e "$(PURPLE)Running Chimera orchestrator specific test suite...$(NC)"
@@ -100,6 +99,14 @@ test-orchestrator:
 test-crawler:
 	@echo -e "$(PURPLE)Testing crawler service...$(NC)"
 	@python3 testing/test_crawler.py
+
+test-openwebui:
+	@echo -e "$(PURPLE)Testing OpenWebUI service...$(NC)"
+	@python3 testing/test_openwebui.py
+
+test-openwebui:
+	@echo -e "$(PURPLE)Testing OpenWebUI service...$(NC)"
+	@python3 testing/test_openwebui.py
 
 # ======================================================================================
 # INFORMATION & DEBUGGING

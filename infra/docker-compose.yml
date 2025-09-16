@@ -9,6 +9,7 @@ volumes:
     name: deepsearch_ollama_data
   redis_data:
   chimera_db:
+  openwebui_data:
 
 networks:
   deepsearch_net:
@@ -94,6 +95,8 @@ services:
       timeout: 5s
       retries: 6
       start_period: 20s
+    ports:
+      - "8080:8080"
 
   # --- CORE LOGIC (DECOUPLED) ---
   search-gateway:
@@ -112,6 +115,8 @@ services:
       - YACY_URL=http://yacy:8090
       - WHOOGLE_URL=http://whoogle:5000
       - SEARXNG_URL=http://searxng:8080
+    ports:
+      - "8002:8002"
 
   search-agent:
     build:
@@ -126,63 +131,36 @@ services:
     env_file: ../.env
     environment:
       - LLM_GATEWAY_URL=http://llm-gateway:8080
+    ports:
+      - "8001:8001"
 
   # --- USER INTERFACE & PROXY ---
-  web-api:
-    build:
-      context: ../services/web-api
-      dockerfile: Dockerfile
-    container_name: web-api-1
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: openwebui-1
     restart: unless-stopped
     networks:
       - deepsearch_net
     depends_on:
-      - search-agent
       - llm-gateway
-      - search-gateway
     environment:
-      - SEARCH_AGENT_URL=http://search-agent:8001
-      - LLM_GATEWAY_URL=http://llm-gateway:8080
-      - SEARCH_GATEWAY_URL=http://search-gateway:8002
-
-  frontend:
-    build:
-      context: ../services/frontend
-      dockerfile: Dockerfile
-    container_name: frontend-1
-    restart: unless-stopped
-    networks:
-      - deepsearch_net
-
-  chimera-frontend:
-    build:
-      context: ../services/ollama-api-server-docker/src/chimera-frontend
-      dockerfile: Dockerfile
-    container_name: chimera-frontend-1
-    restart: unless-stopped
-    networks:
-      - deepsearch_net
-    depends_on:
-      - ollama-orchestrator
-    env_file:
-      - ../.env
-    volumes:
-      - chimera_db:/app/prisma
-
-  reverse-proxy:
-    build:
-      context: ../services/reverse-proxy
-      dockerfile: Dockerfile
-    container_name: reverse-proxy-1
-    restart: unless-stopped
-    networks:
-      - deepsearch_net
+      - OPENAI_API_BASE_URL=http://llm-gateway:8080/v1
+      - OLLAMA_BASE_URL=http://llm-gateway:8080
+      - WEBUI_NAME=DeepSearchStack WebUI
+      - WEBUI_URL=http://localhost:3000
     ports:
-      - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:80:80"
-    depends_on:
-      - frontend
-      - chimera-frontend
-      - web-api
+      - "3000:8080"
+    volumes:
+      - openwebui_data:/app/backend/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+  
+
+  
 
   # --- SEARCH BACKENDS ---
   yacy:

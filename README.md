@@ -16,6 +16,7 @@ Regain sovereignty over your data and build your own private search and reasonin
 -   🔌 **Multi-Provider LLM Gateway:** A resilient, non-blocking gateway that supports local models via **Ollama** and can be extended with external APIs like **Groq** and **Gemini**. It's designed for high availability with automatic provider fallback.
 -   📚 **Retrieval-Augmented Generation (RAG) Ready:** The architecture is built to support a true RAG pipeline, with a dedicated vector store for semantic retrieval.
 -   🚀 **Simple Deployment:** The entire stack is containerized with Docker and managed with a powerful `Makefile`, allowing you to go from clone to query in minutes.
+-   🖥️ **Web Interface:** Includes OpenWebUI for a user-friendly chat interface to interact with your LLMs.
 -   🔧 **Extensible & Configurable:** Easily enable or disable LLM providers, configure which models to use, and add new search backends.
 
 ##  Showcase: Live Demo Output
@@ -52,6 +53,7 @@ graph TD
     subgraph User_Interaction
         CLI[CLI / API Client]
         WebApp[Web UI (web-api)]
+        OpenWebUI[OpenWebUI]
     end
 
     subgraph Core_Logic
@@ -78,6 +80,7 @@ graph TD
 
     CLI --> SearchAgent
     WebApp --> SearchAgent
+    OpenWebUI --> LLMGateway
     SearchAgent --> Whoogle
     SearchAgent --> SearXNG
     SearchAgent --> YaCy
@@ -132,6 +135,9 @@ Once all services are healthy, you can query the `search-agent`:
 python3 examples/query_search_agent.py
 ```
 
+**5. Access the Web Interface**
+Open your browser and navigate to `http://localhost:3000` to access the OpenWebUI interface for chatting with your LLMs.
+
 ---
 
 ## ⚙️ Configuration
@@ -149,6 +155,7 @@ All configuration is managed through the `.env` file.
 | `POSTGRES_DB`            | The name of the PostgreSQL database.                                        | `searchdb`   |
 | `POSTGRES_USER`          | The username for the PostgreSQL database.                                   | `searchuser` |
 | `POSTGRES_PASSWORD`      | The password for the PostgreSQL database.                                   | `searchpass` |
+| `OPENWEBUI_PORT`         | The port on which OpenWebUI will be accessible.                             | `3000`       |
 
 ## 🛠️ Usage & Management
 
@@ -193,6 +200,9 @@ curl -X POST http://localhost:8001/search \
   -d '{"query": "What are the core principles of responsive web design?"}'
 ```
 
+**Access OpenWebUI:**
+Open your browser and navigate to `http://localhost:3000` to access the web interface.
+
 ---
 
 ## 🔬 Development Guide
@@ -209,6 +219,7 @@ Interested in contributing? Here's how to get started.
 ├── search-agent/            # Core agent logic for search and synthesis
 ├── vector-store/            # RAG-enabling vector database service
 ├── crawler/                 # Web crawling service with crawl4ai
+├── openwebui/               # Web interface for chatting with LLMs
 ├── testing/                 # Pytest integration tests
 ├── examples/                # Example client scripts
 └── ... (other service directories)

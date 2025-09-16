@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "ollama_api_base_url": "http://llm-gateway:8080",
+  "default_models": [
+    "gemma:2b"
+  ],
+  "environment": "production"
+}
