@@ -1,0 +1,30 @@
+apiVersion: automation.deeps/v1
+kind: Workflow
+metadata:
+  name: real-llm-test
+  description: "Test workflow using real LLM service"
+spec:
+  triggers:
+    - type: "api"
+      endpoint: "/trigger/llm-test"
+  tasks:
+    - name: "simple-llm-task"
+      type: "llm"
+      provider: "llm-gateway"
+      parameters:
+        provider: "gemini"
+        messages:
+          - role: "system"
+            content: "You are a helpful assistant."
+          - role: "user"
+            content: "What is 2+2? Answer with just the number."
+        temperature: 0.3
+      conditions: {}
+      retries: 1
+      timeout: 30
+  outputs:
+    - name: "llm-result"
+      value: "{{tasks.simple-llm-task.result}}"
+      destinations:
+        - type: "file"
+          path: "/data/test/llm-result-{{workflow.timestamp}}.txt"

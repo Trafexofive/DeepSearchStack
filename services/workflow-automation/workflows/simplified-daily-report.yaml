@@ -1,0 +1,97 @@
+apiVersion: automation.deeps/v1
+kind: Workflow
+metadata:
+  name: simplified-daily-report
+  description: "Simplified daily report with AI news and geopolitical analysis"
+spec:
+  triggers:
+    - type: "api"
+      endpoint: "/trigger/daily-report"
+  tasks:
+    - name: "ai-news-search"
+      type: "search"
+      provider: "search-gateway"
+      parameters:
+        query: "latest breakthrough artificial intelligence research 2025"
+        max_results: 5
+      conditions: {}
+      retries: 2
+      timeout: 60
+      
+    - name: "geopolitical-news-search"
+      type: "search"
+      provider: "search-gateway"
+      parameters:
+        query: "current geopolitical tensions international relations 2025"
+        max_results: 5
+      conditions: {}
+      retries: 2
+      timeout: 60
+      
+    - name: "summarize-ai-news"
+      type: "llm"
+      provider: "llm-gateway"
+      dependsOn: ["ai-news-search"]
+      parameters:
+        provider: "gemini"
+        messages:
+          - role: "system"
+            content: "You are a technology news analyst. Summarize the latest AI breakthroughs in a concise, engaging format. Focus on major developments, new research papers, and significant announcements. Use bullet points for clarity."
+          - role: "user"
+            content: "Summarize these latest AI developments: {{tasks.ai-news-search.result}}"
+        temperature: 0.4
+      conditions: {}
+      retries: 1
+      timeout: 120
+      
+    - name: "summarize-geopolitical-news"
+      type: "llm"
+      provider: "llm-gateway"
+      dependsOn: ["geopolitical-news-search"]
+      parameters:
+        provider: "gemini"
+        messages:
+          - role: "system"
+            content: "You are a geopolitical analyst. Provide a concise summary of current international tensions and relations. Focus on major developments and their potential implications. Use bullet points for clarity."
+          - role: "user"
+            content: "Summarize these geopolitical developments: {{tasks.geopolitical-news-search.result}}"
+        temperature: 0.4
+      conditions: {}
+      retries: 1
+      timeout: 120
+      
+    - name: "compile-daily-report"
+      type: "llm"
+      provider: "llm-gateway"
+      dependsOn: ["summarize-ai-news", "summarize-geopolitical-news"]
+      parameters:
+        provider: "gemini"
+        messages:
+          - role: "system"
+            content: "You are a morning briefing editor. Compile a comprehensive, engaging daily report. Structure it with clear sections and maintain a professional yet approachable tone."
+          - role: "user"
+            content: |
+              Create a daily morning report with these components:
+              
+              # DAILY MORNING BRIEFING
+              
+              ## 🤖 Bleeding-Edge AI News
+              {{tasks.summarize-ai-news.result}}
+              
+              ## 🌍 Geopolitical Sentiments
+              {{tasks.summarize-geopolitical-news.result}}
+              
+              Format the report professionally with clear headings and make it engaging for a morning read.
+        temperature: 0.3
+      conditions: {}
+      retries: 1
+      timeout: 180
+      
+  outputs:
+    - name: "daily-report"
+      value: "{{tasks.compile-daily-report.result}}"
+      destinations:
+        - type: "file"
+          path: "/data/reports/daily-report-{{workflow.timestamp}}.md"
+        - type: "file"
+          path: "/data/reports/latest-daily-report.md"

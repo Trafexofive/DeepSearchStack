@@ -1,0 +1,62 @@
+# Weather Data Analysis Workflow
+apiVersion: automation.deeps/v1
+kind: Workflow
+metadata:
+  name: weather-data-analysis
+  description: "Automated workflow to fetch weather data and analyze trends"
+spec:
+  triggers:
+    - type: "schedule"
+      cron: "*/30 * * * *"  # Every 30 minutes
+    - type: "api"
+      endpoint: "/trigger/weather"
+  tasks:
+    - name: "fetch-weather-data"
+      type: "api"
+      provider: "weather-service"
+      parameters:
+        method: "GET"
+        url: "http://weather-service:8004/weather"
+        query_params:
+          country: "US"
+      conditions: {}
+      retries: 3
+      timeout: 60
+      
+    - name: "analyze-weather-trends"
+      type: "llm"
+      provider: "llm-gateway"
+      dependsOn: ["fetch-weather-data"]
+      parameters:
+        messages:
+          - role: "system"
+            content: "You are a meteorological data analyst. Analyze the provided weather data and identify trends, patterns, and anomalies. Provide a brief summary of your findings."
+          - role: "user"
+            content: "Weather data: {{tasks.fetch-weather-data.result}}"
+        temperature: 0.5
+      conditions: {}
+      retries: 2
+      timeout: 120
+      
+    - name: "store-analysis"
+      type: "storage"
+      provider: "vector-store"
+      dependsOn: ["analyze-weather-trends"]
+      parameters:
+        document:
+          id: "weather-analysis-{{workflow.timestamp}}"
+          text: "{{tasks.analyze-weather-trends.result}}"
+          metadata:
+            source: "automated-workflow"
+            workflow: "weather-data-analysis"
+            timestamp: "{{workflow.timestamp}}"
+      conditions: {}
+      retries: 1
+      timeout: 30
+      
+  outputs:
+    - name: "weather-analysis"
+      value: "{{tasks.analyze-weather-trends.result}}"
+      destinations:
+        - type: "file"
+          path: "/data/weather/analysis-{{workflow.timestamp}}.txt"

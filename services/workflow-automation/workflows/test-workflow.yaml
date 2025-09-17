@@ -1,0 +1,31 @@
+# Test Workflow
+apiVersion: automation.deeps/v1
+kind: Workflow
+metadata:
+  name: test-workflow
+  description: "Simple test workflow"
+spec:
+  triggers:
+    - type: "api"
+      endpoint: "/trigger/test"
+  tasks:
+    - name: "hello-task"
+      type: "llm"
+      provider: "llm-gateway"
+      parameters:
+        messages:
+          - role: "system"
+            content: "You are a helpful assistant."
+          - role: "user"
+            content: "Say hello and tell me the current time is {{workflow.timestamp}}."
+        temperature: 0.7
+      conditions: {}
+      retries: 1
+      timeout: 30
+      
+  outputs:
+    - name: "greeting"
+      value: "{{tasks.hello-task.result}}"
+      destinations:
+        - type: "file"
+          path: "/data/test/greeting-{{workflow.timestamp}}.txt"

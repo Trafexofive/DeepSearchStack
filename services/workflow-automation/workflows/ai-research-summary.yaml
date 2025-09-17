@@ -1,0 +1,60 @@
+# AI Research Summary Workflow
+apiVersion: automation.deeps/v1
+kind: Workflow
+metadata:
+  name: ai-research-summary
+  description: "Automated workflow to search for AI research and generate summaries"
+spec:
+  triggers:
+    - type: "schedule"
+      cron: "0 9 * * *"  # Daily at 9 AM
+    - type: "api"
+      endpoint: "/trigger/ai-research"
+  tasks:
+    - name: "search-ai-advancements"
+      type: "search"
+      provider: "agent"
+      parameters:
+        query: "Latest advancements in artificial intelligence research 2025"
+        max_results: 10
+      conditions: {}
+      retries: 3
+      timeout: 120
+      
+    - name: "summarize-findings"
+      type: "llm"
+      provider: "llm-gateway"
+      dependsOn: ["search-ai-advancements"]
+      parameters:
+        messages:
+          - role: "system"
+            content: "You are a research assistant. Summarize the provided search results into a comprehensive report. Focus on breakthrough research, new techniques, and significant findings. Cite sources where possible."
+          - role: "user"
+            content: "Here are the latest AI research results: {{tasks.search-ai-advancements.result.answer}}"
+        temperature: 0.7
+      conditions: {}
+      retries: 2
+      timeout: 180
+      
+    - name: "store-summary"
+      type: "storage"
+      provider: "vector-store"
+      dependsOn: ["summarize-findings"]
+      parameters:
+        document:
+          id: "ai-research-{{workflow.timestamp}}"
+          text: "{{tasks.summarize-findings.result}}"
+          metadata:
+            source: "automated-workflow"
+            workflow: "ai-research-summary"
+            timestamp: "{{workflow.timestamp}}"
+      conditions: {}
+      retries: 1
+      timeout: 30
+      
+  outputs:
+    - name: "research-summary"
+      value: "{{tasks.summarize-findings.result}}"
+      destinations:
+        - type: "file"
+          path: "/data/summaries/ai-research-{{workflow.timestamp}}.txt"

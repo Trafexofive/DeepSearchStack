@@ -1,0 +1,31 @@
+apiVersion: automation.deeps/v1
+kind: Workflow
+metadata:
+  name: multi-provider-test
+  description: "Test workflow with multiple providers and error handling"
+spec:
+  triggers:
+    - type: "api"
+      endpoint: "/trigger/multi-test"
+  tasks:
+    - name: "test-task"
+      type: "llm"
+      provider: "llm-gateway"
+      parameters:
+        # This will try Gemini first (which will fail due to invalid API key)
+        # Then it should fall back to other available providers
+        messages:
+          - role: "system"
+            content: "You are a helpful assistant."
+          - role: "user"
+            content: "What is the capital of France? Just the city name."
+        temperature: 0.3
+      conditions: {}
+      retries: 1
+      timeout: 30
+  outputs:
+    - name: "result"
+      value: "{{tasks.test-task.result}}"
+      destinations:
+        - type: "file"
+          path: "/data/test/multi-provider-result-{{workflow.timestamp}}.txt"

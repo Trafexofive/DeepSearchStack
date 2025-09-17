@@ -1,0 +1,62 @@
+# Workflow Manifest Schema
+apiVersion: automation.deeps/v1
+kind: Workflow
+metadata:
+  name: example-workflow
+  description: "Example workflow demonstrating the schema"
+spec:
+  triggers:
+    - type: "schedule"
+      cron: "0 * * * *"  # Hourly
+    - type: "api"
+      endpoint: "/trigger/example"
+  tasks:
+    - name: "search-task"
+      type: "search"
+      provider: "agent"
+      parameters:
+        query: "Latest advancements in AI"
+        max_results: 5
+      conditions: {}
+      retries: 3
+      timeout: 120
+      
+    - name: "process-results"
+      type: "llm"
+      provider: "llm-gateway"
+      dependsOn: ["search-task"]
+      parameters:
+        messages:
+          - role: "system"
+            content: "You are a research assistant. Summarize the provided search results."
+          - role: "user"
+            content: "{{tasks.search-task.result}}"
+        temperature: 0.7
+      conditions: {}
+      retries: 2
+      timeout: 60
+      
+    - name: "store-summary"
+      type: "storage"
+      provider: "vector-store"
+      dependsOn: ["process-results"]
+      parameters:
+        collection: "summaries"
+        document:
+          id: "{{workflow.id}}-{{timestamp}}"
+          text: "{{tasks.process-results.result}}"
+          metadata:
+            source: "automated-workflow"
+            timestamp: "{{timestamp}}"
+      conditions: {}
+      retries: 1
+      timeout: 30
+      
+  outputs:
+    - name: "final-summary"
+      value: "{{tasks.process-results.result}}"
+      destinations:
+        - type: "file"
+          path: "/data/summaries/{{workflow.id}}.txt"
+        - type: "api"
+          endpoint: "http://webhook.example.com/summaries"
