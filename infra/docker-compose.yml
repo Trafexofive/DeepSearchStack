@@ -60,6 +60,8 @@ services:
     restart: unless-stopped
     networks:
       - deepsearch_net
+    ports:
+      - "11434:8000"  # Expose orchestrator for testing and LLM gateway access
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ollama_data:/root/.ollama
@@ -88,7 +90,7 @@ services:
         condition: service_healthy
     env_file: ../.env
     environment:
-      - OLLAMA_BASE_URL=http://ollama-orchestrator:8000/api
+      - OLLAMA_BASE_URL=http://ollama-orchestrator:8000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -98,7 +100,7 @@ services:
     ports:
       - "8080:8080"
 
-  # --- CORE LOGIC (DECOUPLED) ---
+  # --- CORE LOGIC ---
   search-gateway:
     build:
       context: ../services/search-gateway
@@ -118,21 +120,39 @@ services:
     ports:
       - "8002:8002"
 
-  search-agent:
+  deepsearch:
     build:
-      context: ../services/search-agent
+      context: ../services/deepsearch
       dockerfile: Dockerfile
-    container_name: search-agent-1
+    container_name: deepsearch-1
     restart: unless-stopped
     networks:
       - deepsearch_net
     depends_on:
-      - llm-gateway
+      llm-gateway:
+        condition: service_healthy
+      search-gateway:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file: ../.env
     environment:
+      - SEARCH_GATEWAY_URL=http://search-gateway:8002
       - LLM_GATEWAY_URL=http://llm-gateway:8080
+      - VECTOR_STORE_URL=http://vector-store:8004
+      - CRAWLER_URL=http://crawler:8000
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_URL=postgresql://searchuser:searchpass@postgres:5432/searchdb
     ports:
       - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # --- USER INTERFACE & PROXY ---
   openwebui:
@@ -143,13 +163,14 @@ services:
       - deepsearch_net
     depends_on:
       - llm-gateway
+    env_file: ../.env
     environment:
       - OPENAI_API_BASE_URL=http://llm-gateway:8080/v1
       - OLLAMA_BASE_URL=http://llm-gateway:8080
       - WEBUI_NAME=DeepSearchStack WebUI
-      - WEBUI_URL=http://localhost:3000
+      - WEBUI_URL=http://localhost:${OPENWEBUI_PORT:-3000}
     ports:
-      - "3000:8080"
+      - "${OPENWEBUI_PORT:-3000}:8080"
     volumes:
       - openwebui_data:/app/backend/data
     healthcheck:
@@ -207,6 +228,14 @@ services:
     restart: unless-stopped
     networks:
       - deepsearch_net
+    ports:
+      - "8004:8004"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   crawler:
     build:
