@@ -1,33 +1,21 @@
-# Stage 1: Build the React application
-FROM node:18-alpine AS builder
+FROM node:20-alpine
 
 WORKDIR /app
 
-# CORRECTED: Copy both package.json AND package-lock.json
-COPY services/frontend/package*.json ./
+# Copy package files
+COPY package*.json ./
 
-# Now 'npm ci' will find the package-lock.json and succeed
-RUN npm ci
+# Install dependencies
+RUN npm install
 
-# Copy the rest of the application source code
-COPY services/frontend/ .
+# Copy app files
+COPY . .
 
-# Build the application for production
-# Assuming your build script is 'build' in package.json
+# Build the app
 RUN npm run build
 
-# Stage 2: Serve the static files with Nginx
-FROM nginx:1.25-alpine
+# Expose port
+EXPOSE 3000
 
-# The build output is likely in a 'dist' or 'build' folder.
-# We'll assume 'dist' based on Vite's default.
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Copy the custom Nginx configuration
-COPY services/frontend/nginx.conf /etc/nginx/conf.d/default.conf
-
-# Expose port 80
-EXPOSE 80
-
-# Start Nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Start the app
+CMD ["npm", "start"]

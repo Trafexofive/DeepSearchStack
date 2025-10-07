@@ -155,6 +155,36 @@ services:
       start_period: 20s
 
   # --- USER INTERFACE & PROXY ---
+  reverse-proxy:
+    build:
+      context: ../services/reverse-proxy
+      dockerfile: Dockerfile
+    container_name: reverse-proxy-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    ports:
+      - "80:80"
+    depends_on:
+      - deepsearch
+      - frontend
+
+  frontend:
+    build:
+      context: ../services/frontend
+      dockerfile: Dockerfile
+    container_name: frontend-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      deepsearch:
+        condition: service_healthy
+    environment:
+      - DEEPSEARCH_API_URL=http://deepsearch:8001
+    ports:
+      - "3001:3000"
+
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: openwebui-1
