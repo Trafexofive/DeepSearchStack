@@ -164,7 +164,7 @@ services:
     networks:
       - deepsearch_net
     ports:
-      - "80:80"
+      - "8090:80"
     depends_on:
       - deepsearch
       - frontend
@@ -181,9 +181,9 @@ services:
       deepsearch:
         condition: service_healthy
     environment:
-      - DEEPSEARCH_API_URL=http://deepsearch:8001
+      - NEXT_PUBLIC_DEEPSEARCH_URL=http://localhost:8001
     ports:
-      - "3001:3000"
+      - "3002:3000"
 
   openwebui:
     image: ghcr.io/open-webui/open-webui:main

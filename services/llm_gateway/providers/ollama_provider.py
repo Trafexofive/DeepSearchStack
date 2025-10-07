@@ -41,7 +41,8 @@ class OllamaProvider(LLMProvider):
     async def is_available(self) -> bool:
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.head(self.base_url, timeout=3.0)
+                # Check if we can reach the orchestrator's API endpoint
+                response = await client.get(f"{self.base_url}/api/tags", timeout=3.0)
                 if self._endpoint is None:
                     await self._probe_endpoint()
                 return response.status_code == 200

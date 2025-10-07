@@ -21,7 +21,7 @@ class GeminiProvider(LLMProvider):
             raise ValueError("Gemini API key is not configured.")
         try:
             genai.configure(api_key=self._api_key)
-            self._model = genai.GenerativeModel('gemini-1.5-flash')
+            self._model = genai.GenerativeModel('gemini-2.0-flash')
         except Exception as e:
             raise RuntimeError(f"Failed to configure Gemini client: {e}")
 
@@ -43,7 +43,7 @@ class GeminiProvider(LLMProvider):
             return CompletionResponse(
                 content=response.text,
                 provider_name=self.get_name(),
-                model='gemini-1.5-flash'
+                model='gemini-2.0-flash'
             )
         except exceptions.ResourceExhausted as e:
             # Re-raise with a more specific HTTP exception context if needed at the gateway level

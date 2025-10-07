@@ -8,7 +8,7 @@ class GroqProvider(LLMProvider):
     def __init__(self, api_key: Optional[str] = None):
         self._api_key = api_key or os.environ.get("GROQ_API_KEY")
         self.base_url = "https://api.groq.com/openai/v1"
-        self.model_name = "llama3-8b-8192"
+        self.model_name = "llama-3.1-8b-instant"
 
     def get_name(self) -> str:
         return "groq"

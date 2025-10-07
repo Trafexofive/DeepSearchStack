@@ -23,12 +23,11 @@ cleanup() {
 cleanup
 
 # --- Configuration ---
-GATEWAY_URL="http://localhost"
-GATEWAY_HOST="api.localhost"
+GATEWAY_URL="http://localhost:11434"
+GATEWAY_HOST=""
 CLIENT="./scripts/client.sh"
 export OLLAMA_HOST="localhost"
-export TRAEFIK_HOST="api.localhost"
-export OLLAMA_PORT=80 # Make client.sh talk to the gateway
+export OLLAMA_PORT=11434 # Make client.sh talk to the orchestrator directly
 
 # --- Helper Functions ---
 print_header() {
@@ -44,7 +43,7 @@ make_gateway_request() {
     local method=$1
     local endpoint=$2
     echo "--> $method $GATEWAY_URL$endpoint"
-    curl -s -X $method -H "Host: $GATEWAY_HOST" "$GATEWAY_URL$endpoint"
+    curl -s -X $method "$GATEWAY_URL$endpoint"
     echo -e "\n"
 }
 

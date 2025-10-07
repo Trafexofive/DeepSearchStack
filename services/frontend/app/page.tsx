@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Search, Send, Loader2 } from 'lucide-react'
+import { Search, Send, Loader2, History } from 'lucide-react'
 
 export default function Home() {
   const [query, setQuery] = useState('')
@@ -9,6 +9,7 @@ export default function Home() {
   const [sources, setSources] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [progress, setProgress] = useState('')
+  const [sessionId, setSessionId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -18,6 +19,27 @@ export default function Home() {
   useEffect(() => {
     scrollToBottom()
   }, [answer])
+
+  // Create session on mount
+  useEffect(() => {
+    const createSession = async () => {
+      try {
+        const response = await fetch('http://localhost:8001/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ metadata: { created_from: 'web_ui' } })
+        })
+        if (response.ok) {
+          const data = await response.json()
+          setSessionId(data.session_id)
+          console.log('Session created:', data.session_id)
+        }
+      } catch (error) {
+        console.error('Failed to create session:', error)
+      }
+    }
+    createSession()
+  }, [])
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -29,18 +51,24 @@ export default function Home() {
     setProgress('Starting search...')
 
     try {
-      const response = await fetch('/api/deepsearch', {
+      const requestBody: any = {
+        query,
+        stream: true,
+        max_results: 30,
+        enable_scraping: true,
+        enable_rag: true,
+      }
+
+      if (sessionId) {
+        requestBody.session_id = sessionId
+      }
+
+      const response = await fetch('http://localhost:8001/deepsearch', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          query,
-          stream: true,
-          max_results: 30,
-          enable_scraping: true,
-          enable_rag: true,
-        }),
+        body: JSON.stringify(requestBody),
       })
 
       if (!response.ok) throw new Error('Search failed')
@@ -91,9 +119,17 @@ export default function Home() {
       {/* Header */}
       <header className="border-b bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-2">
-            <Search className="w-6 h-6" />
-            <h1 className="text-2xl font-bold">DeepSearch</h1>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Search className="w-6 h-6" />
+              <h1 className="text-2xl font-bold">DeepSearch</h1>
+            </div>
+            {sessionId && (
+              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+                <History className="w-4 h-4" />
+                <span>Session: {sessionId.substring(0, 8)}...</span>
+              </div>
+            )}
           </div>
         </div>
       </header>
