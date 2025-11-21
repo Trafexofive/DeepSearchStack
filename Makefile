@@ -17,7 +17,7 @@ COMPOSE := docker compose -p deepsearch -f $(COMPOSE_FILE)
 .DEFAULT_GOAL := help
 
 # --- Phony Targets ---
-.PHONY: help up down logs ps build no-cache restart re config status clean fclean prune stop ssh orchestrator-spawn orchestrator-prune orchestrator-status test-suite test-orchestrator
+.PHONY: help up down logs ps build no-cache restart re config status clean fclean prune stop ssh orchestrator-spawn orchestrator-prune orchestrator-status test-suite test-orchestrator bench
 
 # ======================================================================================
 # HELP & USAGE
@@ -172,3 +172,33 @@ prune: fclean
 	@docker system prune -af --volumes
 	@docker builder prune -af
 	@echo -e "$(GREEN)Full system prune complete.$(NC)"
+
+# ======================================================================================
+# BENCHMARKING
+# ======================================================================================
+bench:
+	@echo -e "$(CYAN)========================================================="
+	@echo -e "     DeepSearchStack - Realistic Business Intelligence Benchmark"
+	@echo -e "=========================================================$(NC)"
+	@echo -e "$(YELLOW)This benchmark simulates a complete business intelligence workflow:$(NC)"
+	@echo -e "$(YELLOW)Goal → Ingest → Aggregate → Transform → Report → Validate$(NC)"
+	@echo ""
+	@echo -e "$(GREEN)Running realistic business intelligence pipeline...$(NC)"
+	python benchmarks/realistic/business_intelligence_bench.py
+
+bench-load:
+	@echo -e "$(CYAN)========================================================="
+	@echo -e "     DeepSearchStack - Load Benchmark Suite"
+	@echo -e "=========================================================$(NC)"
+	@echo -e "$(YELLOW)Running concurrent load tests...$(NC)"
+	@python benchmarks/load/concurrent_load_test.py
+
+bench-stress:
+	@echo -e "$(CYAN)========================================================="
+	@echo -e "     DeepSearchStack - Stress Benchmark Suite"
+	@echo -e "=========================================================$(NC)"
+	@echo -e "$(YELLOW)Running stress tests...$(NC)"
+	@python benchmarks/stress/stress_test.py
+
+bench-all: bench bench-load bench-stress
+	@echo -e "$(GREEN)✅ All benchmark suites completed!$(NC)"
