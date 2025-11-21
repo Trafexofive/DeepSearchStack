@@ -1,177 +1,202 @@
 # ======================================================================================
-# DeepSearchStack Makefile - Definitive Version 10.0 (Restored Glory)
+# Makefile - The Master Control Program
 # ======================================================================================
+# "The distance between thought and action, minimized."
 
 # --- Cosmetics ---
 RED     := \033[0;31m
 GREEN   := \033[0;32m
 YELLOW  := \033[1;33m
 BLUE    := \033[0;34m
+PURPLE  := \033[0;35m
+CYAN    := \033[0;36m
+GRAY    := \033[0;90m
+BOLD    := \033[1m
 NC      := \033[0m
 
 # --- Configuration ---
 SHELL := /bin/bash
-COMPOSE_FILE ?= infra/docker-compose.yml
-COMPOSE := docker compose -p deepsearch -f $(COMPOSE_FILE)
+.SHELLFLAGS := -eu -o pipefail -c
+
+ENV_FILE := infra/env/.dev.env
+ENV_TEMPLATE := infra/env/.env.template
+
+-include $(ENV_FILE)
+PROJECT_NAME ?= deepsearch
+
+STACK ?= core
+COMPOSE_DIR := infra
+NETWORK_NAME := deepsearch-net
+
+# Auto-detect compose file
+ifeq ($(STACK),full)
+    COMPOSE_FILE := $(COMPOSE_DIR)/docker-compose.yml
+else ifeq ($(STACK),gemini)
+    COMPOSE_FILE := $(COMPOSE_DIR)/docker-compose.gemini.yml
+else
+    COMPOSE_FILE := $(COMPOSE_DIR)/docker-compose.$(STACK).yml
+endif
+
+COMPOSE_PROJECT := $(PROJECT_NAME)-$(STACK)
+COMPOSE := docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) -p $(COMPOSE_PROJECT)
+
+# Service parameter (optional, applies to single service)
+service ?=
+SERVICE_FLAG := $(if $(service),$(service),)
 
 .DEFAULT_GOAL := help
-
-# --- Phony Targets ---
-.PHONY: help up down logs ps build no-cache restart re config status clean fclean prune stop ssh orchestrator-spawn orchestrator-prune orchestrator-status test-suite test-orchestrator bench
+.PHONY: help validate-stack validate-service env-check setup up down restart stop logs ps status build rebuild clean fclean prune shell exec health list-stacks create-networks bench bench-load bench-stress bench-all
 
 # ======================================================================================
-# HELP & USAGE
+# VALIDATION HELPERS
 # ======================================================================================
-help:
-	@echo -e "$(BLUE)========================================================================="
-	@echo -e " DeepSearchStack - Master Control Program"
-	@echo -e "=========================================================================$(NC)"
-	@echo -e "$(YELLOW)Usage: make [target] [service=SERVICE_NAME] [args=\"ARGS\"] [model=MODEL_NAME]$(NC)"
-	@echo ""
-	@echo -e "$(GREEN)Core Stack Management:$(NC)"
-	@echo -e "  up                  - Start all services in detached mode."
-	@echo -e "  down                - Stop and remove all services and networks."
-	@echo -e "  restart             - Restart all services (down + up)."
-	@echo -e "  re                  - Rebuild images (cached) and restart all services."
-	@echo -e "  rere                - Rebuild images (no-cache) and restart all services."
-	@echo ""
-	@echo -e "$(GREEN)Information & Debugging:$(NC)"
-	@echo -e "  status [service=<name>] - Show status of services (Alias: ps)."
-	@echo -e "  logs [service=<name>]   - Follow logs (all or specific service)."
-	@echo -e "  ssh service=<name>    - Get an interactive shell into a running service."
-	@echo -e "  exec svc=<name> args=\"<cmd>\" - Execute a command in a running service."
-	@echo ""
-	@echo -e "$(GREEN)Ollama Orchestrator Management:$(NC)"
-	@echo -e "  orchestrator-spawn        - Request the orchestrator to spawn a new worker."
-	@echo -e "  orchestrator-prune        - Request the orchestrator to prune all workers."
-	@echo -e "  orchestrator-status       - View the status of the worker fleet."
-	@echo ""
-	@echo -e "$(GREEN)Testing & Validation:$(NC)"
-	@echo -e "  test-suite                - Runs the main DeepSearchStack integration test suite."
-	@echo -e "  test-orchestrator         - Runs the specific test suite for the Ollama orchestrator."
-	@echo -e "  test-openwebui            - Runs the test suite for the OpenWebUI service."
-	@echo ""
-	@echo -e "$(GREEN)Cleaning & Pruning:$(NC)"
-	@echo -e "  fclean              - Stop and remove all services, volumes, and networks."
-	@echo -e "  prune               - Ultimate clean: fclean + prune entire Docker system."
-	@echo ""
-	@echo -e "$(YELLOW)Execution Order:$(NC)"
-	@echo -e "  1. make up                       # Start stack. The default model is pulled automatically by workers."
-	@echo -e "$(BLUE)========================================================================="
+
+validate-stack:
+	@if [ ! -f "$(COMPOSE_FILE)" ]; then \
+		echo -e "$(RED)✖ Stack '$(STACK)' not found: $(COMPOSE_FILE)$(NC)"; \
+		echo -e "$(YELLOW)Available stacks:$(NC)"; \
+		ls -1 $(COMPOSE_DIR)/docker-compose*.yml | sed 's|$(COMPOSE_DIR)/docker-compose\.||; s|\.yml||' | sed 's/^/  - /'; \
+		exit 1; \
+	fi
+
+validate-service: validate-stack
+	@if [ -n "$(service)" ]; then \
+		if ! $(COMPOSE) config --services 2>/dev/null | grep -q "^$(service)$$"; then \
+			echo -e "$(RED)✖ Service '$(service)' not found in stack '$(STACK)'$(NC)"; \
+			echo -e "$(YELLOW)Available services:$(NC)"; \
+			$(COMPOSE) config --services 2>/dev/null | sed 's/^/  - /'; \
+			exit 1; \
+		fi; \
+	fi
+
+env-check:
+	@if [ ! -f "$(ENV_FILE)" ]; then \
+		echo -e "$(YELLOW)⚠  Environment file not found: $(ENV_FILE)$(NC)"; \
+		if [ -f "$(ENV_TEMPLATE)" ]; then \
+			echo -e "$(BLUE)Creating from template...$(NC)"; \
+			cp $(ENV_TEMPLATE) $(ENV_FILE); \
+			echo -e "$(GREEN)✅ Created $(ENV_FILE) - please review and update$(NC)"; \
+		else \
+			echo -e "$(RED)✖ No template found. Create $(ENV_FILE) manually.$(NC)"; \
+			exit 1; \
+		fi; \
+	else \
+		echo -e "$(GREEN)✅ Environment file exists: $(ENV_FILE)$(NC)"; \
+	fi
 
 # ======================================================================================
-# CORE STACK MANAGEMENT
+# CORE OPERATIONS
 # ======================================================================================
-up:
-	@echo -e "$(GREEN)Igniting Deep Search Agent Stack...$(NC)"
-	@$(COMPOSE) up -d --remove-orphans
-	@echo -e "$(GREEN)Services are now running in detached mode.$(NC)"
 
-down:
-	@echo -e "$(RED)Shutting down DeepSearchStack...$(NC)"
+setup: env-check create-networks
+	@echo -e "$(GREEN)✅ Setup complete$(NC)"
+
+create-networks:
+	@echo -e "$(BLUE)🌐 Creating necessary networks...$(NC)"
+	@docker network create $(NETWORK_NAME) 2>/dev/null || echo -e "$(GRAY)  Network $(NETWORK_NAME) already exists$(NC)"
+	@echo -e "$(GREEN)✅ Networks ready.$(NC)"
+
+up: validate-service setup
+	@echo -e "$(BLUE)🚀 Starting stack: $(STACK)$(NC)"
+	@$(COMPOSE) up -d $(SERVICE_FLAG)
+	@echo -e "$(GREEN)✅ Stack running$(NC)"
+	@$(MAKE) --no-print-directory list-stacks
+
+down: validate-stack
+	@echo -e "$(YELLOW)🛑 Stopping stack: $(STACK)$(NC)"
 	@$(COMPOSE) down --remove-orphans
+	@echo -e "$(GREEN)✅ Stack stopped$(NC)"
+	@$(MAKE) --no-print-directory list-stacks
 
-restart: down up
-re: down build up logs
-rere: down no-cache up logs
+restart: validate-service
+	@echo -e "$(BLUE)♻️  Restarting: $(STACK)$(if $(service), [$(service)],)$(NC)"
+	@$(COMPOSE) restart $(SERVICE_FLAG)
+	@echo -e "$(GREEN)✅ Restart complete$(NC)"
 
-# ======================================================================================
-# BUILDING IMAGES
-# ======================================================================================
-build:
-	@echo -e "$(BLUE)Forging components... Building images for $(or $(service),all services)...$(NC)"
-	@$(COMPOSE) build $(service)
+stop: validate-service
+	@echo -e "$(YELLOW)⏸️  Stopping: $(STACK)$(if $(service), [$(service)],)$(NC)"
+	@$(COMPOSE) stop $(SERVICE_FLAG)
 
-no-cache:
-	@echo -e "$(YELLOW)Force-forging (no cache)... Building for $(or $(service),all services)...$(NC)"
-	@$(COMPOSE) build --no-cache $(service)
-
-# ======================================================================================
-# TESTING & VALIDATION
-# ======================================================================================
-
-
-
-test-orchestrator:
-	@echo -e "$(PURPLE)Running Chimera orchestrator specific test suite...$(NC)"
-	@cd services/ollama-api-server-docker && ./tests/test_orchestrator.sh
-
-test-crawler:
-	@echo -e "$(PURPLE)Testing crawler service...$(NC)"
-	@python3 testing/test_crawler.py
-
-test-openwebui:
-	@echo -e "$(PURPLE)Testing OpenWebUI service...$(NC)"
-	@python3 testing/test_openwebui.py
-
-test-openwebui:
-	@echo -e "$(PURPLE)Testing OpenWebUI service...$(NC)"
-	@python3 testing/test_openwebui.py
+start: validate-service
+	@echo -e "$(BLUE)▶️  Starting: $(STACK)$(if $(service), [$(service)],)$(NC)"
+	@$(COMPOSE) start $(SERVICE_FLAG)
 
 # ======================================================================================
-# INFORMATION & DEBUGGING
+# BUILD & REBUILD
 # ======================================================================================
-status:
-	@echo -e "$(BLUE)System Status Report:$(NC)"
-	@$(COMPOSE) ps $(service)
-ps: status
 
-logs:
-	@echo -e "$(BLUE)Tapping into data stream for $(or $(service),all services)...$(NC)"
-	@$(COMPOSE) logs -f --tail="100" $(service)
+build: validate-service
+	@echo -e "$(BLUE)🔨 Building: $(STACK)$(if $(service), [$(service)],)$(NC)"
+	@$(COMPOSE) build $(SERVICE_FLAG)
+	@echo -e "$(GREEN)✅ Build complete$(NC)"
 
-ssh:
+rebuild: validate-service
+	@echo -e "$(BLUE)🔨 Rebuilding (no-cache): $(STACK)$(if $(service), [$(service)],)$(NC)"
+	@$(COMPOSE) build --no-cache $(SERVICE_FLAG)
+	@echo -e "$(GREEN)✅ Rebuild complete$(NC)"
+
+re: build restart
+
+rere: rebuild restart
+
+# ======================================================================================
+# MONITORING
+# ======================================================================================
+
+logs: validate-service
+	@$(COMPOSE) logs -f --tail=100 $(SERVICE_FLAG)
+
+ps status: validate-service
+	@if [ -n "$(service)" ]; then \
+		$(COMPOSE) ps $(service); \
+	else \
+		echo -e "$(CYAN)📊 System Status Report:$(NC)"; \
+		$(COMPOSE) ps -a; \
+	fi
+
+shell: validate-service
 	@if [ -z "$(service)" ]; then \
-		echo -e "$(RED)Error: Service name required. Usage: make ssh service=<service_name>$(NC)"; \
+		echo -e "$(RED)✖ Usage: make shell STACK=$(STACK) service=<name>$(NC)"; \
+		echo -e "$(YELLOW)Available services:$(NC)"; \
+		$(COMPOSE) config --services | sed 's/^/  - /'; \
 		exit 1; \
 	fi
-	@echo -e "$(GREEN)Establishing connection to $(service)...$(NC)"
-	@$(COMPOSE) exec $(service) /bin/sh || $(COMPOSE) exec $(service) /bin/bash
+	@$(COMPOSE) exec $(service) sh
 
-exec:
-	@if [ -z "$(svc)" ] || [ -z "$(args)" ]; then \
-		echo -e "$(RED)Error: Service and command required. Usage: make exec svc=<name> args=\"<cmd>\"$(NC)"; \
+exec: validate-service
+	@if [ -z "$(service)" ] || [ -z "$(cmd)" ]; then \
+		echo -e "$(RED)✖ Usage: make exec STACK=$(STACK) service=<name> cmd=\"<command>\"$(NC)"; \
 		exit 1; \
 	fi
-	@echo -e "$(GREEN)Executing remote directive in $(svc): $(args)...$(NC)"
-	@$(COMPOSE) exec $(svc) $(args)
+	@$(COMPOSE) exec $(service) $(cmd)
+
+health: validate-stack
+	@echo -e "$(CYAN)🏥 Health Check:$(NC)"
+	@$(COMPOSE) ps --format json | jq -r '.[] | "\(.Service): \(.State) - \(.Health)"'
 
 # ======================================================================================
-# OLLAMA ORCHESTRATOR MANAGEMENT
+# CLEANUP
 # ======================================================================================
 
-orchestrator-spawn:
-	@echo -e "$(BLUE)Requesting orchestrator to spawn 1 new worker...$(NC)"
-	@curl -s -X POST http://localhost/orchestrator/admin/instances/spawn | jq .
-	@echo -e "$(GREEN)Request sent.$(NC)"
+clean: validate-stack
+	@echo -e "$(YELLOW)🧹 Cleaning stack: $(STACK)$(NC)"
+	@$(COMPOSE) down --remove-orphans
+	@echo -e "$(GREEN)✅ Clean complete$(NC)"
 
-orchestrator-prune:
-	@echo -e "$(RED)Requesting orchestrator to prune all workers...$(NC)"
-	@curl -s -X POST http://localhost/orchestrator/admin/instances/prune | jq .
-	@echo -e "$(GREEN)Request sent.$(NC)"
-
-orchestrator-status:
-	@echo -e "$(BLUE)Fetching orchestrator status...$(NC)"
-	@curl -s http://localhost/orchestrator/admin/instances | jq .
-
-# ======================================================================================
-# CLEANING & PRUNING
-# ======================================================================================
-
-fclean:
-	@echo -e "$(RED)Deep cleaning containers, networks, and volumes...$(NC)"
-	@echo -e "$(YELLOW)First, removing any orphaned worker containers...$(NC)"
-	-@for id in $(docker ps -a -q --filter "label=ollama-worker"); do docker stop $id && docker rm -f $id; done
-	@echo -e "$(YELLOW)Second, removing any orphaned chimera containers...$(NC)"
-	-@docker compose -f services/ollama-api-server-docker/docker-compose.yml down --volumes --remove-orphans 2>/dev/null || true
-	@echo -e "$(YELLOW)Finally, taking down the main stack...$(NC)"
+fclean: validate-stack
+	@echo -e "$(RED)🧹 Full clean (including volumes): $(STACK)$(NC)"
 	@$(COMPOSE) down --volumes --remove-orphans
+	@echo -e "$(GREEN)✅ Full clean complete$(NC)"
 
 prune: fclean
-	@echo -e "$(RED)Executing ultimate prune sequence...$(NC)"
-	@docker system prune -af --volumes
-	@docker builder prune -af
-	@echo -e "$(GREEN)Full system prune complete.$(NC)"
+	@echo -e "$(RED)🧹 System prune (WARNING: affects all Docker resources)$(NC)"
+	@read -p "Continue? [y/N] " -n 1 -r; echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		docker system prune -af --volumes; \
+		echo -e "$(GREEN)✅ System pruned$(NC)"; \
+	else \
+		echo -e "$(GRAY)Cancelled$(NC)"; \
+	fi
 
 # ======================================================================================
 # BENCHMARKING
@@ -191,14 +216,137 @@ bench-load:
 	@echo -e "     DeepSearchStack - Load Benchmark Suite"
 	@echo -e "=========================================================$(NC)"
 	@echo -e "$(YELLOW)Running concurrent load tests...$(NC)"
-	@python benchmarks/load/concurrent_load_test.py
+	@echo -e "$(GREEN)Load benchmark not implemented yet - create benchmarks/load/concurrent_load_test.py$(NC)"
 
 bench-stress:
 	@echo -e "$(CYAN)========================================================="
-	@echo -e "     DeepSearchStack - Stress Benchmark Suite"
+	@echo -e "     DeepSearchStack - Stress Benchmark Suite" 
 	@echo -e "=========================================================$(NC)"
 	@echo -e "$(YELLOW)Running stress tests...$(NC)"
-	@python benchmarks/stress/stress_test.py
+	@echo -e "$(GREEN)Stress benchmark not implemented yet - create benchmarks/stress/stress_test.py$(NC)"
 
 bench-all: bench bench-load bench-stress
 	@echo -e "$(GREEN)✅ All benchmark suites completed!$(NC)"
+
+# ======================================================================================
+# STACK DASHBOARD
+# ======================================================================================
+
+list-stacks:
+	@echo -e "\n$(PURPLE)╔══════════════════════════════════════════════════════════════════════════════╗$(NC)"; \
+	echo -e "$(PURPLE)║$(NC)                    $(BOLD)$(CYAN)🧩 Docker Stack Status Dashboard$(NC)                    $(PURPLE)║$(NC)"; \
+	echo -e "$(PURPLE)╚══════════════════════════════════════════════════════════════════════════════╝$(NC)\n"; \
+	total_stacks=0; total_running=0; total_unhealthy=0; total_offline=0; \
+	for f in $(COMPOSE_DIR)/docker-compose*.yml; do \
+		stack_name="<unknown>"; \
+		if [[ "$$f" == "$(COMPOSE_DIR)/docker-compose.yml" ]]; then stack_name="full"; \
+		else stack_name=$$(basename "$$f" .yml | sed 's/docker-compose\.//'); fi; \
+		project_name="$(PROJECT_NAME)-$$stack_name"; \
+		running_cnt=$$(docker ps -q --filter "status=running" --filter "label=com.docker.compose.project=$$project_name" 2>/dev/null | wc -l); \
+		total_cnt=$$(docker ps -a -q --filter "label=com.docker.compose.project=$$project_name" 2>/dev/null | wc -l); \
+		unhealthy_cnt=$$(docker ps -q --filter "health=unhealthy" --filter "label=com.docker.compose.project=$$project_name" 2>/dev/null | wc -l); \
+		total_stacks=$$((total_stacks + 1)); \
+		if [ "$$running_cnt" -gt 0 ]; then \
+			uptime=$$(docker ps --filter "status=running" --filter "label=com.docker.compose.project=$$project_name" --format "{{.Status}}" | head -n 1 | sed 's/Up //; s/ ago//; s/ ([^)]*)//'); \
+			if [ "$$unhealthy_cnt" -gt 0 ]; then \
+				total_unhealthy=$$((total_unhealthy + 1)); \
+				printf "$(RED)● %-18s$(NC) $(RED)%-11s$(NC) [%2d/%2d running]  ⏱  %s\n" "$$stack_name" "UNHEALTHY" "$$running_cnt" "$$total_cnt" "$$uptime"; \
+			elif [ "$$running_cnt" -eq "$$total_cnt" ]; then \
+				total_running=$$((total_running + 1)); \
+				printf "$(GREEN)● %-18s$(NC) $(GREEN)%-11s$(NC) [%2d/%2d running]  ⏱  %s\n" "$$stack_name" "OPERATIONAL" "$$running_cnt" "$$total_cnt" "$$uptime"; \
+			else \
+				printf "$(YELLOW)● %-18s$(NC) $(YELLOW)%-11s$(NC) [%2d/%2d running]  ⏱  %s\n" "$$stack_name" "DEGRADED" "$$running_cnt" "$$total_cnt" "$$uptime"; \
+			fi; \
+			services_list=$$(docker ps --filter "label=com.docker.compose.project=$$project_name" --format "{{.Names}}" 2>/dev/null | sort); \
+			service_count=$$(echo "$$services_list" | wc -l); \
+			current_service=0; \
+			echo "$$services_list" | while IFS= read -r service_name; do \
+				current_service=$$((current_service + 1)); \
+				prefix="├──"; [ "$$current_service" -eq "$$service_count" ] && prefix="└──"; \
+				status=$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$$service_name" 2>/dev/null || echo "error"); \
+				status_color="$(GRAY)"; dot="$(GRAY)○$(NC)"; label="UNKNOWN"; \
+				if [[ "$$status" == "healthy" ]]; then status_color="$(GREEN)"; dot="$(GREEN)●$(NC)"; label="HEALTHY"; \
+				elif [[ "$$status" == "unhealthy" ]]; then status_color="$(RED)"; dot="$(RED)●$(NC)"; label="UNHEALTHY"; \
+				elif [[ "$$status" == "running" ]]; then status_color="$(YELLOW)"; dot="$(YELLOW)●$(NC)"; label="RUNNING"; \
+				elif [[ "$$status" == "exited" ]]; then status_color="$(RED)"; dot="$(RED)●$(NC)"; label="EXITED"; fi; \
+				service_name_clean=$$(echo "$$service_name" | sed "s/$$project_name-//; s/-[0-9]*$$//"); \
+				printf "     %s %-25s %b%-10s$(NC) %b\n" "$$prefix" "$$service_name_clean" "$$status_color" "$$label" "$$dot"; \
+			done; \
+			echo ""; \
+		else \
+			if [ "$$total_cnt" -gt 0 ]; then \
+				total_offline=$$((total_offline + 1)); \
+				printf "$(RED)● %-18s$(NC) $(RED)%-11s$(NC) [%2d/%2d stopped]\n\n" "$$stack_name" "STOPPED" "$$running_cnt" "$$total_cnt"; \
+			else \
+				printf "$(GRAY)○ %-18s$(NC) $(GRAY)%-11s$(NC) [no containers]\n\n" "$$stack_name" "OFFLINE"; \
+			fi; \
+		fi; \
+	done; \
+	echo -e "$(PURPLE)──────────────────────────────────────────────────────────────────────────────$(NC)"; \
+	echo -e " $(BOLD)Summary:$(NC)  $(GREEN)✔ $$total_running running$(NC),  $(RED)✖ $$total_unhealthy unhealthy$(NC),  $(GRAY)○ $$total_offline offline$(NC),  total: $$total_stacks"; \
+	echo -e "$(PURPLE)──────────────────────────────────────────────────────────────────────────────$(NC)\n"; \
+	echo -e " Legend:  $(GREEN)●$(GRAY)=Healthy  $(YELLOW)●$(GRAY)=Degraded  $(RED)●$(GRAY)=Unhealthy  $(GRAY)○$(GRAY)=Offline$(NC)\n"
+
+# ======================================================================================
+# HELP
+# ======================================================================================
+
+help:
+	@echo -e "$(BLUE)========================================================================="
+	@echo -e " Makefile - The Master Control Program"
+	@echo -e "=========================================================================$(NC)"
+	@echo -e "$(CYAN)\"The distance between thought and action, minimized.\"$(NC)"
+	@echo ""
+	@echo -e "$(YELLOW)Usage: make [target] STACK=<name> [service=<name>]$(NC)"
+	@echo ""
+	@echo -e "$(GREEN)Core Operations:$(NC)"
+	@echo -e "  up                   - Start stack (all services or specific service=)"
+	@echo -e "  down                 - Stop and remove stack"
+	@echo -e "  restart              - Restart stack or service"
+	@echo -e "  stop/start           - Stop/start without removing"
+	@echo -e "  build                - Build images (cached)"
+	@echo -e "  rebuild              - Build images (no-cache)"
+	@echo -e "  re/rere              - Build and restart (cached/no-cache)"
+	@echo ""
+	@echo -e "$(GREEN)Monitoring:$(NC)"
+	@echo -e "  logs                 - Follow logs (all or service=)"
+	@echo -e "  ps/status            - Show container status"
+	@echo -e "  list-stacks          - Dashboard of all stacks"
+	@echo -e "  health               - Health check report"
+	@echo ""
+	@echo -e "$(GREEN)Testing:$(NC)"
+	@echo -e "  bench                - Run realistic business intelligence benchmark"
+	@echo -e "  bench-load           - Run load tests (not implemented)"
+	@echo -e "  bench-stress         - Run stress tests (not implemented)"
+	@echo -e "  bench-all            - Run all benchmark suites"
+	@echo ""
+	@echo -e "$(GREEN)Utilities:$(NC)"
+	@echo -e "  shell service=<name> - Interactive shell in container"
+	@echo -e "  exec service=<name> cmd=\"<cmd>\" - Execute command"
+	@echo ""
+	@echo -e "$(GREEN)Cleanup:$(NC)"
+	@echo -e "  clean                - Stop and remove containers"
+	@echo -e "  fclean               - Clean + remove volumes"
+	@echo -e "  prune                - Full system prune (interactive)"
+	@echo ""
+	@echo -e "$(YELLOW)Examples:$(NC)"
+	@echo -e "  make up STACK=gemini"
+	@echo -e "  make logs STACK=gemini service=deepsearch"
+	@echo -e "  make restart STACK=gemini service=llm-gateway"
+	@echo -e "  make down STACK=gemini"
+	@echo ""
+	@echo -e "$(GRAY)All operations support STACK= and service= parameters$(NC)"
+	@echo -e "$(BLUE)=========================================================================$(NC)"
+
+# ======================================================================================
+# STACK-SPECIFIC SHORTCUTS
+# ======================================================================================
+
+gemini:
+	@$(MAKE) up STACK=gemini
+
+gemini-down:
+	@$(MAKE) down STACK=gemini
+
+gemini-restart:
+	@$(MAKE) restart STACK=gemini
