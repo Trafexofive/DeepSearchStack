@@ -139,6 +139,7 @@ exec:
 # ======================================================================================
 # OLLAMA ORCHESTRATOR MANAGEMENT
 # ======================================================================================
+
 orchestrator-spawn:
 	@echo -e "$(BLUE)Requesting orchestrator to spawn 1 new worker...$(NC)"
 	@curl -s -X POST http://localhost/orchestrator/admin/instances/spawn | jq .
@@ -156,6 +157,7 @@ orchestrator-status:
 # ======================================================================================
 # CLEANING & PRUNING
 # ======================================================================================
+
 fclean:
 	@echo -e "$(RED)Deep cleaning containers, networks, and volumes...$(NC)"
 	@echo -e "$(YELLOW)First, removing any orphaned worker containers...$(NC)"

@@ -1,4 +1,4 @@
-# Enhanced LLM Gateway
+# LLM Gateway
 
 Production-ready multi-provider LLM gateway with advanced routing, monitoring, and reliability features.
 
@@ -29,8 +29,8 @@ Production-ready multi-provider LLM gateway with advanced routing, monitoring, a
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Load Balancer │───▶│  Enhanced LLM    │───▶│   Provider      │
-│                 │    │    Gateway       │    │   Manager       │
+│   Load Balancer │───▶│    LLM Gateway   │───▶│   Provider      │
+│                 │    │                  │    │   Manager       │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                               │                          │
                               ▼                          ▼
@@ -74,8 +74,8 @@ DEFAULT_RATE_LIMIT_REFILL_RATE=1.0
 ### Using Docker (Recommended)
 
 ```bash
-# Build enhanced version
-docker build -f Dockerfile.enhanced -t llm-gateway-enhanced .
+# Build the Docker image
+docker build -t llm-gateway .
 
 # Run with environment variables
 docker run -p 8080:8080 \
@@ -83,7 +83,7 @@ docker run -p 8080:8080 \
   -e GEMINI_API_KEY=your_key \
   -e ENABLE_GROQ=true \
   -e GROQ_API_KEY=your_key \
-  llm-gateway-enhanced
+  llm-gateway
 ```
 
 ### Using Python
@@ -96,8 +96,8 @@ pip install -r requirements.txt
 export ENABLE_GEMINI=true
 export GEMINI_API_KEY=your_key
 
-# Run enhanced gateway
-python -m llm_gateway.enhanced_api_gateway
+# Run the gateway
+python -m llm_gateway.api_gateway
 ```
 
 ## 📡 API Endpoints
@@ -232,7 +232,7 @@ pytest tests/ -v
 
 1. Create provider class inheriting from `LLMProvider`
 2. Implement required methods
-3. Register in `enhanced_api_gateway.py`
+3. Register in `api_gateway.py`
 4. Add configuration environment variables
 
 ### Custom Rate Limits
@@ -254,7 +254,7 @@ services:
   llm-gateway:
     build:
       context: .
-      dockerfile: services/llm_gateway/Dockerfile.enhanced
+      dockerfile: services/llm_gateway/Dockerfile
     ports:
       - "8080:8080"
     environment:
@@ -285,7 +285,7 @@ spec:
     spec:
       containers:
       - name: llm-gateway
-        image: llm-gateway-enhanced:latest
+        image: llm-gateway:latest
         ports:
         - containerPort: 8080
         env:

@@ -1,28 +1,39 @@
 # ======================================================================================
-# LLM Gateway Dockerfile - Final Version
-#
-# Base Image: Uses the full `python:3.11` image instead of `slim` to ensure all
-# system-level libraries required by dependencies (like google-generativeai's
-# grpcio) are present. This resolves the instant-crash issue on startup.
+# Enhanced LLM Gateway Dockerfile - Production Ready
 # ======================================================================================
 
-FROM python:3.11
+FROM python:3.11-slim
 
-# Set the working directory
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
 WORKDIR /app
 
-# Add the application directory to the Python path to allow for module imports
-ENV PYTHONPATH "${PYTHONPATH}:/app"
+# Add the application directory to Python path
+ENV PYTHONPATH="${PYTHONPATH}:/app"
 
-# Copy and install only the runtime requirements
-COPY services/llm_gateway/requirements.txt .
+# Copy requirements first for better caching
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application code into the container
-COPY services/llm_gateway/ ./llm_gateway
+# Copy application code
+COPY . ./llm_gateway
 
-# Expose the port the application runs on
+# Create non-root user for security
+RUN groupadd -r llmgateway && useradd -r -g llmgateway llmgateway
+RUN chown -R llmgateway:llmgateway /app
+USER llmgateway
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Expose port
 EXPOSE 8080
 
-# The command to run the application using Uvicorn
-CMD ["uvicorn", "llm_gateway.api_gateway:app", "--host", "0.0.0.0", "--port", "8080"]
+# Use enhanced gateway
+CMD ["uvicorn", "llm_gateway.api_gateway:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

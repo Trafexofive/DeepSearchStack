@@ -27,7 +27,7 @@ class SessionModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     messages = Column(JSON, default=[])
-    metadata = Column(JSON, default={})
+    session_metadata = Column(JSON, default={})
 
 
 class SessionStorage:
@@ -174,7 +174,7 @@ class SessionStorage:
                     created_at=session_model.created_at,
                     updated_at=session_model.updated_at,
                     messages=[SessionMessage(**m) for m in session_model.messages],
-                    metadata=session_model.metadata
+                    metadata=session_model.session_metadata
                 )
         return None
     
@@ -190,7 +190,7 @@ class SessionStorage:
             if existing:
                 # Update
                 existing.messages = [m.dict() for m in session.messages]
-                existing.metadata = session.metadata
+                existing.session_metadata = session.metadata
                 existing.updated_at = session.updated_at
             else:
                 # Insert
@@ -199,7 +199,7 @@ class SessionStorage:
                     created_at=session.created_at,
                     updated_at=session.updated_at,
                     messages=[m.dict() for m in session.messages],
-                    metadata=session.metadata
+                    session_metadata=session.metadata
                 ))
             
             await db.commit()
@@ -239,7 +239,7 @@ class SessionStorage:
                     created_at=s.created_at,
                     updated_at=s.updated_at,
                     messages=[SessionMessage(**m) for m in s.messages],
-                    metadata=s.metadata
+                    metadata=s.session_metadata
                 )
                 for s in session_models
             ]

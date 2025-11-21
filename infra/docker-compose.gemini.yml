@@ -1,15 +1,11 @@
-
 # ======================================================================================
-# DeepSearchStack - Definitive Docker Compose Configuration (Restored & Corrected)
+# DeepSearchStack - Docker Compose Configuration (Gemini-Only Version)
 # ======================================================================================
 
 volumes:
   postgres_data:
   yacy_data:
-  ollama_data:
-    name: deepsearch_ollama_data
   redis_data:
-  chimera_db:
   openwebui_data:
 
 networks:
@@ -53,31 +49,6 @@ services:
       retries: 5
 
   # --- AI SERVICES ---
-  ollama-orchestrator:
-    build:
-      context: ../services/ollama-api-server-docker/src/api-gateway
-      dockerfile: Dockerfile
-    container_name: ollama-orchestrator-1
-    restart: unless-stopped
-    networks:
-      - deepsearch_net
-    ports:
-      - "11434:8000"  # Expose orchestrator for testing and LLM gateway access
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ollama_data:/root/.ollama
-    env_file: ../.env
-    environment:
-      - WORKER_IMAGE=${WORKER_IMAGE:-ollama/ollama:latest}
-      - OLLAMA_DEFAULT_MODEL=${OLLAMA_DEFAULT_MODEL:-gemma:2b}
-      - CHIMERA_NETWORK=deepsearch_net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/admin/instances"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-      start_period: 20s
-
   llm-gateway:
     build:
       context: ../services/llm_gateway
@@ -86,12 +57,12 @@ services:
     restart: unless-stopped
     networks:
       - deepsearch_net
-    depends_on:
-      ollama-orchestrator:
-        condition: service_healthy
     env_file: ../.env
     environment:
-      - OLLAMA_BASE_URL=http://ollama-orchestrator:8000
+      # Remove OLLAMA_BASE_URL since we're using only Gemini
+      - ENABLE_GEMINI=true
+      - ENABLE_GROQ=${ENABLE_GROQ:-false}
+      - ENABLE_OLLAMA=false  # Disable Ollama
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -170,63 +141,62 @@ services:
       - deepsearch
       - frontend
 
-  # frontend:
-  #   build:
-  #     context: ../services/frontend
-  #     dockerfile: Dockerfile
-  #   container_name: frontend-1
-  #   restart: unless-stopped
-  #   networks:
-  #     - deepsearch_net
-  #   depends_on:
-  #     deepsearch:
-  #       condition: service_healthy
-  #   environment:
-  #     - NEXT_PUBLIC_DEEPSEARCH_URL=http://localhost:8001
-  #   ports:
-  #     - "3002:3000"
-  #
-  # openwebui:
-  #   image: ghcr.io/open-webui/open-webui:main
-  #   container_name: openwebui-1
-  #   restart: unless-stopped
-  #   networks:
-  #     - deepsearch_net
-  #   depends_on:
-  #     - llm-gateway
-  #   env_file: ../.env
-  #   environment:
-  #     - OPENAI_API_BASE_URL=http://llm-gateway:8080/v1
-  #     - OLLAMA_BASE_URL=http://llm-gateway:8080
-  #     - WEBUI_NAME=DeepSearchStack WebUI
-  #     - WEBUI_URL=http://localhost:${OPENWEBUI_PORT:-3000}
-  #   ports:
-  #     - "${OPENWEBUI_PORT:-3000}:8080"
-  #   volumes:
-  #     - openwebui_data:/app/backend/data
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 60s
-  
+  frontend:
+    build:
+      context: ../services/frontend
+      dockerfile: Dockerfile
+    container_name: frontend-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      deepsearch:
+        condition: service_healthy
+    environment:
+      - NEXT_PUBLIC_DEEPSEARCH_URL=http://localhost:8001
+    ports:
+      - "3002:3000"
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: openwebui-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      - llm-gateway
+    env_file: ../.env
+    environment:
+      - OPENAI_API_BASE_URL=http://llm-gateway:8080/v1
+      # Remove Ollama base URL since we're not using it
+      - WEBUI_NAME=DeepSearchStack WebUI
+      - WEBUI_URL=http://localhost:${OPENWEBUI_PORT:-3000}
+    ports:
+      - "${OPENWEBUI_PORT:-3000}:8080"
+    volumes:
+      - openwebui_data:/app/backend/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # --- SEARCH BACKENDS ---
-  # yacy:
-  #   image: yacy/yacy_search_server:latest
-  #   container_name: yacy-1
-  #   restart: unless-stopped
-  #   networks:
-  #     - deepsearch_net
-  #   volumes:
-  #     - yacy_data:/opt/yacy_search_server/DATA
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8090/api/status.json"]
-  #     interval: 15s
-  #     timeout: 10s
-  #     retries: 20
-  #     start_period: 120s
+  yacy:
+    image: yacy/yacy_search_server:latest
+    container_name: yacy-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    volumes:
+      - yacy_data:/opt/yacy_search_server/DATA
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/status.json"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
 
   whoogle:
     image: benbusby/whoogle-search:latest

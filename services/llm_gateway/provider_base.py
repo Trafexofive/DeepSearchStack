@@ -14,17 +14,24 @@ class Message(BaseModel):
     role: str
     content: str
 
+class ToolCall(BaseModel):
+    id: str
+    type: str = "function"
+    function: Dict[str, str]
+
 class CompletionRequest(BaseModel):
     messages: List[Message]
     temperature: float = 0.7
     max_tokens: Optional[int] = None
     stream: bool = False
+    tools: Optional[List[Dict]] = None
 
 class CompletionResponse(BaseModel):
-    content: str
+    content: Optional[str] = None
     provider_name: str
     model: str
     usage: Dict[str, int | float] = {}
+    tool_calls: Optional[List[ToolCall]] = None
 
 class LLMProvider(ABC):
     @abstractmethod
