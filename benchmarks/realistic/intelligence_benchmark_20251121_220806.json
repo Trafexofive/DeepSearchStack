@@ -1,0 +1,206 @@
+{
+  "benchmark_type": "Business Intelligence Pipeline",
+  "goal": "Analyze current AI industry trends and predict market opportunities for enterprise AI solutions",
+  "timestamp": "2025-11-21T22:08:06.561149",
+  "metrics": {
+    "total_duration": 40.41127562522888,
+    "successful_operations": 17,
+    "total_operations": 22,
+    "success_rate": 0.7727272727272727,
+    "average_response_time": 1.815561912276528,
+    "operations_per_minute": 32.66415077419432
+  },
+  "phases": {
+    "planning_time": 4.76837158203125e-07,
+    "ingestion_time": 32.695377588272095,
+    "aggregation_time": 5.983257293701172,
+    "transformation_time": 1.2642543315887451,
+    "reporting_time": 0.3169832229614258,
+    "quality_time": 0.15137386322021484
+  },
+  "results": [
+    {
+      "stage": "PLANNING",
+      "operation": "Define research strategy",
+      "success": true,
+      "response_time": 4.76837158203125e-07,
+      "timestamp": "2025-11-21T22:07:26.149826",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Search-1",
+      "success": true,
+      "response_time": 7.4470438957214355,
+      "timestamp": "2025-11-21T22:07:33.596888",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-1-1",
+      "success": true,
+      "response_time": 1.0244934558868408,
+      "timestamp": "2025-11-21T22:07:34.621410",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-1-2",
+      "success": true,
+      "response_time": 0.7386982440948486,
+      "timestamp": "2025-11-21T22:07:35.360133",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Search-2",
+      "success": true,
+      "response_time": 7.487587928771973,
+      "timestamp": "2025-11-21T22:07:42.847738",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-2-1",
+      "success": true,
+      "response_time": 1.2938232421875,
+      "timestamp": "2025-11-21T22:07:44.141603",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-2-2",
+      "success": true,
+      "response_time": 0.9599282741546631,
+      "timestamp": "2025-11-21T22:07:45.101551",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Search-3",
+      "success": true,
+      "response_time": 7.745156764984131,
+      "timestamp": "2025-11-21T22:07:52.846723",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-3-1",
+      "success": true,
+      "response_time": 1.1501095294952393,
+      "timestamp": "2025-11-21T22:07:53.996861",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-3-2",
+      "success": true,
+      "response_time": 0.6371777057647705,
+      "timestamp": "2025-11-21T22:07:54.634059",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Search-4",
+      "success": true,
+      "response_time": 0.5023210048675537,
+      "timestamp": "2025-11-21T22:07:55.136395",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-4-1",
+      "success": true,
+      "response_time": 1.1152243614196777,
+      "timestamp": "2025-11-21T22:07:56.251660",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-4-2",
+      "success": true,
+      "response_time": 0.8424513339996338,
+      "timestamp": "2025-11-21T22:07:57.094141",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Search-5",
+      "success": true,
+      "response_time": 0.5663011074066162,
+      "timestamp": "2025-11-21T22:07:57.660461",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-5-1",
+      "success": true,
+      "response_time": 0.6330389976501465,
+      "timestamp": "2025-11-21T22:07:58.293544",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-5-2",
+      "success": true,
+      "response_time": 0.5516362190246582,
+      "timestamp": "2025-11-21T22:07:58.845206",
+      "details": ""
+    },
+    {
+      "stage": "AGGREGATION",
+      "operation": "Pattern Analysis",
+      "success": false,
+      "response_time": 1.4931511878967285,
+      "timestamp": "2025-11-21T22:08:00.338388",
+      "details": "Error: LLM completion failed: 500, message='Internal Server Error', url='http://localhost:8081/v1/chat/completions'"
+    },
+    {
+      "stage": "AGGREGATION",
+      "operation": "Individual Trend Analysis",
+      "success": true,
+      "response_time": 4.490026473999023,
+      "timestamp": "2025-11-21T22:08:04.828458",
+      "details": ""
+    },
+    {
+      "stage": "TRANSFORMATION",
+      "operation": "Strategic Analysis",
+      "success": false,
+      "response_time": 1.2641932964324951,
+      "timestamp": "2025-11-21T22:08:06.092708",
+      "details": "Error: LLM completion failed: 500, message='Internal Server Error', url='http://localhost:8081/v1/chat/completions'"
+    },
+    {
+      "stage": "REPORTING",
+      "operation": "Executive Summary",
+      "success": false,
+      "response_time": -2.384185791015625e-07,
+      "timestamp": "2025-11-21T22:08:06.250574",
+      "details": "Error: LLM completion failed: 500, message='Internal Server Error', url='http://localhost:8081/v1/chat/completions'"
+    },
+    {
+      "stage": "REPORTING",
+      "operation": "Case Study Generation",
+      "success": false,
+      "response_time": -4.76837158203125e-07,
+      "timestamp": "2025-11-21T22:08:06.409690",
+      "details": "Error: LLM completion failed: 500, message='Internal Server Error', url='http://localhost:8081/v1/chat/completions'"
+    },
+    {
+      "stage": "QUALITY",
+      "operation": "Report Validation",
+      "success": false,
+      "response_time": -7.152557373046875e-07,
+      "timestamp": "2025-11-21T22:08:06.561071",
+      "details": "Error: LLM completion failed: 500, message='Internal Server Error', url='http://localhost:8081/v1/chat/completions'"
+    }
+  ],
+  "outputs": {
+    "executive_summary_present": true,
+    "case_study_present": true,
+    "sources_analyzed": 1,
+    "documents_processed": 10,
+    "aggregation_performed": true
+  }
+}
