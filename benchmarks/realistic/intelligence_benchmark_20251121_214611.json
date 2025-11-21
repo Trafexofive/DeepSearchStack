@@ -1,0 +1,206 @@
+{
+  "benchmark_type": "Business Intelligence Pipeline",
+  "goal": "Analyze current AI industry trends and predict market opportunities for enterprise AI solutions",
+  "timestamp": "2025-11-21T21:46:11.439593",
+  "metrics": {
+    "total_duration": 41.11640977859497,
+    "successful_operations": 17,
+    "total_operations": 22,
+    "success_rate": 0.7727272727272727,
+    "average_response_time": 1.805223898454146,
+    "operations_per_minute": 32.103970339530626
+  },
+  "phases": {
+    "planning_time": 4.76837158203125e-07,
+    "ingestion_time": 33.184226274490356,
+    "aggregation_time": 5.04587459564209,
+    "transformation_time": 1.485440969467163,
+    "reporting_time": 1.2444257736206055,
+    "quality_time": 0.15640735626220703
+  },
+  "results": [
+    {
+      "stage": "PLANNING",
+      "operation": "Define research strategy",
+      "success": true,
+      "response_time": 4.76837158203125e-07,
+      "timestamp": "2025-11-21T21:45:30.323154",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Search-1",
+      "success": true,
+      "response_time": 7.778059959411621,
+      "timestamp": "2025-11-21T21:45:38.101238",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-1-1",
+      "success": true,
+      "response_time": 1.1836833953857422,
+      "timestamp": "2025-11-21T21:45:39.284969",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-1-2",
+      "success": true,
+      "response_time": 0.7127294540405273,
+      "timestamp": "2025-11-21T21:45:39.997732",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Search-2",
+      "success": true,
+      "response_time": 7.849648714065552,
+      "timestamp": "2025-11-21T21:45:47.847403",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-2-1",
+      "success": true,
+      "response_time": 1.3795673847198486,
+      "timestamp": "2025-11-21T21:45:49.227023",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-2-2",
+      "success": true,
+      "response_time": 0.9713025093078613,
+      "timestamp": "2025-11-21T21:45:50.198345",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Search-3",
+      "success": true,
+      "response_time": 7.148611307144165,
+      "timestamp": "2025-11-21T21:45:57.346971",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-3-1",
+      "success": true,
+      "response_time": 1.1403627395629883,
+      "timestamp": "2025-11-21T21:45:58.487363",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-3-2",
+      "success": true,
+      "response_time": 0.6515929698944092,
+      "timestamp": "2025-11-21T21:45:59.138976",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Search-4",
+      "success": true,
+      "response_time": 0.521986722946167,
+      "timestamp": "2025-11-21T21:45:59.660978",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-4-1",
+      "success": true,
+      "response_time": 1.1348202228546143,
+      "timestamp": "2025-11-21T21:46:00.795830",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-4-2",
+      "success": true,
+      "response_time": 0.8436367511749268,
+      "timestamp": "2025-11-21T21:46:01.639512",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Search-5",
+      "success": true,
+      "response_time": 0.5423943996429443,
+      "timestamp": "2025-11-21T21:46:02.181931",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-5-1",
+      "success": true,
+      "response_time": 0.7207314968109131,
+      "timestamp": "2025-11-21T21:46:02.902745",
+      "details": ""
+    },
+    {
+      "stage": "INGESTION",
+      "operation": "Crawl-5-2",
+      "success": true,
+      "response_time": 0.604597806930542,
+      "timestamp": "2025-11-21T21:46:03.507376",
+      "details": ""
+    },
+    {
+      "stage": "AGGREGATION",
+      "operation": "Pattern Analysis",
+      "success": false,
+      "response_time": 1.825925350189209,
+      "timestamp": "2025-11-21T21:46:05.333354",
+      "details": "Error: LLM completion failed: 500, message='Internal Server Error', url='http://localhost:8081/v1/chat/completions'"
+    },
+    {
+      "stage": "AGGREGATION",
+      "operation": "Individual Trend Analysis",
+      "success": true,
+      "response_time": 3.2198827266693115,
+      "timestamp": "2025-11-21T21:46:08.553254",
+      "details": ""
+    },
+    {
+      "stage": "TRANSFORMATION",
+      "operation": "Strategic Analysis",
+      "success": false,
+      "response_time": 1.485391616821289,
+      "timestamp": "2025-11-21T21:46:10.038706",
+      "details": "Error: LLM completion failed: 500, message='Internal Server Error', url='http://localhost:8081/v1/chat/completions'"
+    },
+    {
+      "stage": "REPORTING",
+      "operation": "Executive Summary",
+      "success": false,
+      "response_time": 0.0,
+      "timestamp": "2025-11-21T21:46:11.279926",
+      "details": "Error: LLM completion failed: 500, message='Internal Server Error', url='http://localhost:8081/v1/chat/completions'"
+    },
+    {
+      "stage": "REPORTING",
+      "operation": "Case Study Generation",
+      "success": false,
+      "response_time": -2.384185791015625e-07,
+      "timestamp": "2025-11-21T21:46:11.283129",
+      "details": "Error: LLM completion failed: 500, message='Internal Server Error', url='http://localhost:8081/v1/chat/completions'"
+    },
+    {
+      "stage": "QUALITY",
+      "operation": "Report Validation",
+      "success": false,
+      "response_time": 0.0,
+      "timestamp": "2025-11-21T21:46:11.439547",
+      "details": "Error: LLM completion failed: 500, message='Internal Server Error', url='http://localhost:8081/v1/chat/completions'"
+    }
+  ],
+  "outputs": {
+    "executive_summary_present": true,
+    "case_study_present": true,
+    "sources_analyzed": 1,
+    "documents_processed": 10,
+    "aggregation_performed": true
+  }
+}
