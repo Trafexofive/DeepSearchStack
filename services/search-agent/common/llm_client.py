@@ -1,28 +1,25 @@
 # ======================================================================================
-# Search Agent's LLM Client - Final Version
+# Search Agent's LLM Client - Updated to use common models
 #
 # Description:
-# This client communicates with the LLM Gateway. This final version includes the
-# necessary `Message` Pydantic model to correctly structure the data sent to the
-# gateway, resolving the fatal import error on startup.
+# This client communicates with the LLM Gateway using common models from libs.common
 # ======================================================================================
 import os
 import httpx
+import json
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel
 
-class Message(BaseModel):
-    role: str
-    content: str
+# Import Message model from the common library
+from libs.common.models import Message
 
 class LLMClient:
     """Client to interact with the LLM API Gateway"""
-    
+
     def __init__(self, base_url: Optional[str] = None):
         self.base_url = base_url or os.environ.get("LLM_GATEWAY_URL", "http://llm-gateway:8080")
-    
-    async def get_completion(self, 
-                           messages: List[Message], 
+
+    async def get_completion(self,
+                           messages: List[Message],
                            provider: Optional[str] = None,
                            temperature: float = 0.7) -> str:
         """Get a complete, non-streaming response from the LLM Gateway."""
@@ -33,7 +30,7 @@ class LLMClient:
             "fallback": True,
             "stream": False
         }
-        
+
         async with httpx.AsyncClient(timeout=90.0) as client:
             response = await client.post(f"{self.base_url}/completion", json=payload)
             response.raise_for_status()
@@ -49,7 +46,7 @@ class LLMClient:
             "fallback": True,
             "stream": True
         }
-        
+
         try:
             async with httpx.AsyncClient(timeout=90.0) as client:
                 async with client.stream("POST", f"{self.base_url}/completion", json=payload) as response:
