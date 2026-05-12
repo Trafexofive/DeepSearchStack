@@ -1,0 +1,14 @@
+version: "3.8"
+services:
+  inference_gateway:
+    build: .
+    ports:
+      - "8005:8005"
+    environment:
+      - INFERENCE_GATEWAY_PORT=8005
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./config:/app/config:ro
+    env_file:
+      - ../../.env

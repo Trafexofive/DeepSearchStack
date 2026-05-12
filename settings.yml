@@ -27,6 +27,12 @@ services:
       openai:
         api_key: ${OPENAI_API_KEY:-}
 
+  inference_gateway:
+    port: 8005
+    providers:
+      deepseek:
+        api_key: ${DEEPSEEK_API_KEY:-}
+
   event_bus:
     provider: redis
     redis_url: ${REDIS_URL:-redis://localhost:6379/0}

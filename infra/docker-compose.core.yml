@@ -53,6 +53,19 @@ services:
     networks:
       - substrate-net
 
+  inference_gateway:
+    build: ../services/inference-gateway
+    ports:
+      - "8005:8005"
+    environment:
+      - INFERENCE_GATEWAY_PORT=8005
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ../services/inference-gateway/config:/app/config:ro
+    networks:
+      - substrate-net
+
   event_bus:
     build: ../services/event_bus
     ports:
