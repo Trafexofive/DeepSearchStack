@@ -1,0 +1,28 @@
+# Allow AI search bots (citations)
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+# Allow Bing (Copilot)
+User-agent: Bingbot
+Allow: /
+
+# Allow everyone else too — this is a public blog
+User-agent: *
+Allow: /
+
+Sitemap: https://substrate.pub/sitemap.xml
