@@ -5,6 +5,7 @@ Drop more providers into providers/ and register them below.
 """
 
 import os
+import json
 import httpx
 import logging
 from copy import deepcopy
@@ -182,7 +183,8 @@ async def _single_request(request: ChatCompletionRequest, provider_name: str) ->
         if request.stream:
             async def stream_generator():
                 async for chunk in provider.chat_stream(request):
-                    yield chunk
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                yield "data: [DONE]\n\n"
             return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
         return await provider.chat(request)

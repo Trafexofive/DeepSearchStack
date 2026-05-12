@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.logger import init_logging, new_request_id, RequestLogger
 from app.tracker import init_db, get_stats, get_history
-from app.generator import generate_blog_post
+from app.generator import generate_blog_post, generate_researched_blog
 
 init_logging(os.getenv("LOG_LEVEL", "INFO"))
 init_db()
@@ -38,6 +38,7 @@ class GenerateResponse(BaseModel):
     topic: str
     model: str
     content: str
+    sources: list[dict] = []
     usage: dict
     cost_usd: float
     duration_ms: int
@@ -115,6 +116,28 @@ async def generate(req: GenerateRequest, request: Request):
     except Exception as e:
         rlog.error(f"Generation failed: {e}")
         raise HTTPException(status_code=502, detail=f"Generation failed: {str(e)}")
+
+
+@app.post("/generate-researched", response_model=GenerateResponse)
+async def generate_researched(req: GenerateRequest, request: Request):
+    """Research a topic via DeepSearch, then generate a blog post with real sources."""
+    rid = getattr(request.state, "rid", new_request_id())
+    rlog = RequestLogger(log, rid)
+    rlog.info(f"Researched generate request: topic={req.topic[:80]} model={req.model} style={req.style}")
+
+    try:
+        result = await generate_researched_blog(
+            topic=req.topic,
+            model=req.model,
+            style=req.style,
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+            rid=rid,
+        )
+        return GenerateResponse(**result)
+    except Exception as e:
+        rlog.error(f"Researched generation failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Researched generation failed: {str(e)}")
 
 
 @app.get("/stats", response_model=StatsResponse)

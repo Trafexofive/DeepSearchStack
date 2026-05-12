@@ -50,7 +50,7 @@ class DeepSeekProvider(BaseProvider):
             raw_response=data,
         )
 
-    async def chat_stream(self, request: ChatCompletionRequest) -> AsyncGenerator[str, None]:
+    async def chat_stream(self, request: ChatCompletionRequest) -> AsyncGenerator[dict, None]:
         payload = request.model_dump()
         payload["stream"] = True
 
@@ -61,13 +61,8 @@ class DeepSeekProvider(BaseProvider):
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if line.startswith("data: "):
-                    line = line[6:]
-                if line == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(line)
-                    delta = chunk["choices"][0].get("delta", {})
-                    if "content" in delta:
-                        yield delta["content"]
-                except (json.JSONDecodeError, KeyError):
-                    continue
+                    try:
+                        chunk = json.loads(line[6:])
+                        yield chunk
+                    except json.JSONDecodeError:
+                        continue

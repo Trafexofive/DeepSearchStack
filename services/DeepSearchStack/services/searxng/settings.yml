@@ -178,7 +178,7 @@ engines:
     disabled: false
   - name: dictzone
     engine: dictzone
-    shortcut: dz
+    
     disabled: false
 
   # --- Media ---

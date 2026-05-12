@@ -1,8 +1,6 @@
 # Substrate Core — Motherboard Docker Compose
 # Boots all runtime services and their dependencies.
 
-version: "3.8"
-
 services:
   # ─── Core Services ──────────────────────────────────────────────────────────
 
@@ -66,6 +64,28 @@ services:
     networks:
       - substrate-net
 
+  deepsearch:
+    build:
+      context: ../services/DeepSearchStack
+      dockerfile: services/deepsearch/Dockerfile
+    ports:
+      - "8007:8001"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - INFERENCE_GATEWAY_URL=http://inference_gateway:8005
+      - SEARCH_GATEWAY_URL=http://search_gateway:8002
+      - VECTOR_STORE_URL=http://vector_store:8004
+      - CRAWLER_URL=http://crawler:8000
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-deepsearch}:${POSTGRES_PASSWORD:-deepsearch}@${POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-deepsearch}
+    depends_on:
+      - inference_gateway
+    networks:
+      substrate-net:
+      deepsearch_net:
+        aliases:
+          - deepsearch
+
   blog_generator:
     build: ../services/blog_generator
     ports:
@@ -121,6 +141,8 @@ services:
 networks:
   substrate-net:
     driver: bridge
+  deepsearch_net:
+    external: true
 
 volumes:
   redis-data:

@@ -6,6 +6,7 @@ WORKDIR /app
 COPY services/search-gateway/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY libs/ /app/libs/
 COPY services/search-gateway/ /app/search_gateway/
 
 ENV PYTHONPATH=/app

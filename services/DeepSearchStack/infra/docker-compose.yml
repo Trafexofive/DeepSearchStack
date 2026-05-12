@@ -1,6 +1,6 @@
 # ======================================================================================
 # DeepSearchStack — Streamlined Docker Compose
-# LLM routing via substrate inference-gateway (port 8005, on substrate-net)
+# LLM routing via substrate inference-gateway (port 8005, on infra_substrate-net)
 # ======================================================================================
 
 volumes:
@@ -13,7 +13,7 @@ networks:
   deepsearch_net:
     driver: bridge
     name: deepsearch_net
-  substrate-net:
+  infra_substrate-net:
     external: true
 
 services:
@@ -79,7 +79,7 @@ services:
     restart: unless-stopped
     networks:
       - deepsearch_net
-      - substrate-net
+      - infra_substrate-net
     depends_on:
       search-gateway:
         condition: service_started

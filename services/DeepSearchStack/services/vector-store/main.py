@@ -4,19 +4,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 import chromadb
-from chromadb.config import Settings
 
-# Persistent storage path (volume-mounted in Docker)
 PERSIST_DIR = os.environ.get("CHROMA_PERSIST_DIR", "/app/data")
 
 app = FastAPI(title="Vector Store", version="1.0.0")
 
-# Initialize ChromaDB with persistent storage
-client = chromadb.Client(Settings(
-    chroma_db_impl="duckdb+parquet",
-    persist_directory=PERSIST_DIR,
-    anonymized_telemetry=False,
-))
+# ChromaDB 1.x PersistentClient — auto-creates /app/data if needed
+client = chromadb.PersistentClient(path=PERSIST_DIR)
 collection = client.get_or_create_collection("documents")
 
 
@@ -38,7 +32,6 @@ async def embed_documents(req: EmbedRequest):
             documents=[doc.text for doc in req.documents],
             metadatas=[doc.metadata or {} for doc in req.documents],
         )
-        client.persist()
         return {"message": f"Embedded {len(req.documents)} documents", "count": len(req.documents)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

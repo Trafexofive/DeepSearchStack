@@ -12,7 +12,7 @@ AI-powered blog post generation with structured JSON logging and token/cost trac
 | GET | `/health` | `{"status":"ok","generations":N}` |
 | POST | `/generate` | Generate a blog post |
 | GET | `/stats` | Aggregate token/cost statistics |
-| GET | `/history?limit=20&offset=0` | Past generations |
+| POST | `/generate-researched` | Research via DeepSearch, then generate blog with sources |
 
 ## Generate Request
 ```json
