@@ -33,6 +33,10 @@ services:
       deepseek:
         api_key: ${DEEPSEEK_API_KEY:-}
 
+  blog_generator:
+    port: 8006
+    tracker_db: /app/data/tracker.db
+
   event_bus:
     provider: redis
     redis_url: ${REDIS_URL:-redis://localhost:6379/0}

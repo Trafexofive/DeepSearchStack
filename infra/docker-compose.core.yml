@@ -66,6 +66,21 @@ services:
     networks:
       - substrate-net
 
+  blog_generator:
+    build: ../services/blog_generator
+    ports:
+      - "8006:8006"
+    environment:
+      - BLOG_GENERATOR_PORT=8006
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TRACKER_DB=/app/data/tracker.db
+    depends_on:
+      - inference_gateway
+    volumes:
+      - ../services/blog_generator/volumes/data:/app/data
+    networks:
+      - substrate-net
+
   event_bus:
     build: ../services/event_bus
     ports:
