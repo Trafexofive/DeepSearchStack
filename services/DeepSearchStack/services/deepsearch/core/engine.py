@@ -24,7 +24,7 @@ class DeepSearchEngine:
     
     def __init__(self):
         self.search_gateway_url = config.get_service_url("search_gateway")
-        self.llm_gateway_url = config.get_service_url("llm_gateway")
+        self.inference_gateway_url = config.get_service_url("inference_gateway")
         self.vector_store_url = config.get_service_url("vector_store")
         self.crawler_url = config.get_service_url("crawler")
         
@@ -176,7 +176,7 @@ class DeepSearchEngine:
                     rag_chunks=rag_chunks if rag_chunks else None,
                     session_id=request.session_id,
                     execution_time=execution_time,
-                    provider_used=request.llm_provider or config.synthesis_config.get("default_provider", "ollama"),
+                    provider_used=config.synthesis_config.get("model", "deepseek-chat"),
                     total_results=len(search_results),
                     results_scraped=len(scraped_content),
                     chunks_retrieved=len(rag_chunks)
@@ -356,38 +356,49 @@ class DeepSearchEngine:
         llm_provider: Optional[str],
         temperature: Optional[float]
     ) -> AsyncIterator[str]:
-        """Stream LLM synthesis"""
-        provider = llm_provider or config.synthesis_config.get("default_provider", "ollama")
+        """Stream LLM synthesis via inference-gateway (OpenAI-compatible API)"""
+        model = config.synthesis_config.get("model", "deepseek-chat")
         temp = temperature or config.synthesis_config.get("temperature", 0.3)
         system_prompt = config.synthesis_config.get("system_prompt", "")
-        
+        max_tokens = config.synthesis_config.get("max_tokens", 4096)
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"User Query: {query}\n\nSearch Context:\n{context}"}
         ]
-        
+
         payload = {
-            "provider": provider,
+            "model": model,
             "messages": messages,
             "temperature": temp,
-            "stream": True
+            "max_tokens": max_tokens,
+            "stream": True,
         }
-        
+        # Route via x-provider header if specified
+        headers = {"Content-Type": "application/json"}
+        if llm_provider:
+            headers["x-provider"] = llm_provider
+
         try:
             async with self.http_client.stream(
                 "POST",
-                f"{self.llm_gateway_url}/completion",
+                f"{self.inference_gateway_url}/v1/chat/completions",
                 json=payload,
-                timeout=config.synthesis_config.get("timeout", 120.0)
+                headers=headers,
+                timeout=config.synthesis_config.get("timeout", 120.0),
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
+                        data_str = line[6:].strip()
+                        if data_str == "[DONE]":
+                            break
                         try:
-                            data = json.loads(line[6:])
-                            if "content" in data:
-                                yield data["content"]
-                        except json.JSONDecodeError:
+                            data = json.loads(data_str)
+                            delta = data["choices"][0].get("delta", {})
+                            if delta.get("content"):
+                                yield delta["content"]
+                        except (json.JSONDecodeError, KeyError, IndexError):
                             continue
         except Exception as e:
             logger.error(f"LLM synthesis error: {e}")

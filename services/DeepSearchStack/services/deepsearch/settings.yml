@@ -113,13 +113,16 @@ rag:
 
 # --- LLM Synthesis Configuration ---
 synthesis:
-  # Default LLM provider: "ollama", "groq", "gemini"
-  default_provider: "ollama"
+  # Model sent to inference-gateway (OpenAI-compatible)
+  model: "deepseek-v4-flash"
   
   # Fallback providers if default fails
   fallback_providers:
     - "groq"
     - "gemini"
+  
+  # Maximum tokens in LLM response
+  max_tokens: 4096
   
   # Maximum context tokens to send to LLM
   max_context_tokens: 8000
@@ -256,7 +259,7 @@ advanced:
 # --- Service URLs (internal) ---
 services:
   search_gateway: "http://search-gateway:8002"
-  llm_gateway: "http://llm-gateway:8080"
+  inference_gateway: "http://inference_gateway:8005"
   vector_store: "http://vector-store:8004"
   crawler: "http://crawler:8000"
   redis: "redis://redis:6379/0"

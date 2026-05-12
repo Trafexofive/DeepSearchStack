@@ -39,16 +39,20 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 DeepSearch service starting...")
     start_time = time.time()
     
-    # Initialize engine
+    # Initialize engine (always works, no dependencies)
     engine = DeepSearchEngine()
     await engine.initialize()
     logger.info("✓ DeepSearch engine initialized")
     
-    # Initialize storage
+    # Initialize session storage (best-effort, don't crash if DB unavailable)
     if config.session_config.get("enabled", True):
-        storage = SessionStorage()
-        await storage.initialize()
-        logger.info("✓ Session storage initialized")
+        try:
+            storage = SessionStorage()
+            await storage.initialize()
+            logger.info("✓ Session storage initialized")
+        except Exception as e:
+            logger.warning(f"⚠ Session storage unavailable (degraded mode): {e}")
+            storage = None
     
     logger.info("✓ DeepSearch service ready")
     
@@ -233,7 +237,7 @@ async def health_check():
     # Check dependencies
     dependencies = {
         "search_gateway": True,  # TODO: actual health checks
-        "llm_gateway": True,
+        "inference_gateway": True,
         "vector_store": config.rag_config.get("enabled", True),
         "crawler": config.scraping_config.get("enabled", True),
     }
@@ -260,7 +264,7 @@ async def get_config():
         "scraping": config.scraping_config,
         "rag": config.rag_config,
         "synthesis": {
-            "default_provider": config.synthesis_config.get("default_provider"),
+            "model": config.synthesis_config.get("model"),
             "streaming": config.synthesis_config.get("streaming"),
             "temperature": config.synthesis_config.get("temperature"),
         },

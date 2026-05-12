@@ -1,8 +1,17 @@
+# ===================================================================
+# SearXNG — Maximum Bloated Configuration for DeepSearchStack
+# All engines enabled, all formats, no rate limits
+# ===================================================================
+
 use_default_settings: true
 
 server:
   secret_key: "a8a3e9a3b1d1c4b7f8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3"
   limiter: false
+  image_proxy: true
+  port: 8080
+  bind_address: "0.0.0.0"
+  public_instance: false
 
 ui:
   static_use_hash: false
@@ -11,3 +20,283 @@ search:
   formats:
     - html
     - json
+    - csv
+    - rss
+  safe_search: 0
+  autocomplete: "google"
+  default_lang: ""
+  languages:
+    - all
+  ban_time_on_fail: 0
+  max_ban_time_on_fail: 0
+
+engines:
+  # --- General Web Search ---
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+  - name: brave
+    engine: brave
+    shortcut: br
+    disabled: false
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+  - name: mojeek
+    engine: mojeek
+    shortcut: mj
+    disabled: false
+  - name: qwant
+    engine: qwant
+    shortcut: qw
+    disabled: false
+  - name: startpage
+    engine: startpage
+    shortcut: sp
+    disabled: false
+  - name: yahoo
+    engine: yahoo
+    shortcut: yh
+    disabled: false
+  - name: yep
+    engine: yep
+    shortcut: yep
+    disabled: false
+  - name: presearch
+    engine: presearch
+    shortcut: pre
+    disabled: false
+  - name: ecosia
+    engine: ecosia
+    shortcut: eco
+    disabled: false
+  - name: crowdsview
+    engine: crowdsview
+    shortcut: cv
+    disabled: false
+
+  # --- Wikipedia & Knowledge ---
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
+  - name: wikidata
+    engine: wikidata
+    shortcut: wd
+    disabled: false
+  - name: wikibooks
+    engine: wikibooks
+    shortcut: wb
+    disabled: false
+  - name: wikinews
+    engine: wikinews
+    shortcut: wn
+    disabled: false
+  - name: wikiquote
+    engine: wikiquote
+    shortcut: wq
+    disabled: false
+  - name: wikisource
+    engine: wikisource
+    shortcut: ws
+    disabled: false
+  - name: wikiversity
+    engine: wikiversity
+    shortcut: wv
+    disabled: false
+  - name: wikivoyage
+    engine: wikivoyage
+    shortcut: wy
+    disabled: false
+  - name: wolframalpha
+    engine: wolframalpha
+    shortcut: wa
+    disabled: false
+
+  # --- Technical / Dev ---
+  - name: github
+    engine: github
+    shortcut: gh
+    disabled: false
+  - name: gitlab
+    engine: gitlab
+    shortcut: gl
+    disabled: false
+  - name: stackoverflow
+    engine: stackoverflow
+    shortcut: so
+    disabled: false
+  - name: packagist
+    engine: packagist
+    shortcut: pkg
+    disabled: false
+  - name: pypi
+    engine: pypi
+    shortcut: pypi
+    disabled: false
+  - name: npm
+    engine: npm
+    shortcut: npm
+    disabled: false
+  - name: cran
+    engine: cran
+    shortcut: cran
+    disabled: false
+  - name: docker_hub
+    engine: docker_hub
+    shortcut: dh
+    disabled: false
+  - name: pubmed
+    engine: pubmed
+    shortcut: pm
+    disabled: false
+  - name: arxiv
+    engine: arxiv
+    shortcut: arx
+    disabled: false
+  - name: crossref
+    engine: crossref
+    shortcut: cr
+    disabled: false
+  - name: openverse
+    engine: openverse
+    shortcut: ov
+    disabled: false
+  - name: semantic_scholar
+    engine: semantic_scholar
+    shortcut: ss
+    disabled: false
+  - name: duden
+    engine: duden
+    shortcut: du
+    disabled: false
+  - name: dictzone
+    engine: dictzone
+    shortcut: dz
+    disabled: false
+
+  # --- Media ---
+  - name: youtube
+    engine: youtube
+    shortcut: yt
+    disabled: false
+  - name: vimeo
+    engine: vimeo
+    shortcut: vm
+    disabled: false
+  - name: soundcloud
+    engine: soundcloud
+    shortcut: sc
+    disabled: false
+  - name: bandcamp
+    engine: bandcamp
+    shortcut: bc
+    disabled: false
+  - name: deviantart
+    engine: deviantart
+    shortcut: da
+    disabled: false
+  - name: flickr
+    engine: flickr
+    shortcut: fl
+    disabled: false
+  - name: imgur
+    engine: imgur
+    shortcut: img
+    disabled: false
+  - name: unsplash
+    engine: unsplash
+    shortcut: us
+    disabled: false
+  - name: bing_images
+    engine: bing_images
+    shortcut: bii
+    disabled: false
+  - name: google_images
+    engine: google_images
+    shortcut: gi
+    disabled: false
+  - name: duckduckgo_images
+    engine: duckduckgo_images
+    shortcut: ddgi
+    disabled: false
+  - name: qwant_images
+    engine: qwant_images
+    shortcut: qwi
+    disabled: false
+
+  # --- News ---
+  - name: google_news
+    engine: google_news
+    shortcut: gn
+    disabled: false
+  - name: bing_news
+    engine: bing_news
+    shortcut: bin
+    disabled: false
+
+  # --- Maps & Location ---
+  - name: openstreetmap
+    engine: openstreetmap
+    shortcut: osm
+    disabled: false
+  - name: google_maps
+    engine: google_maps
+    shortcut: gm
+    disabled: false
+
+  # --- Torrent / P2P ---
+  - name: 1337x
+    engine: 1337x
+    shortcut: 1337x
+    disabled: false
+  - name: piratebay
+    engine: piratebay
+    shortcut: tpb
+    disabled: false
+  - name: solidtorrents
+    engine: solidtorrents
+    shortcut: sbrn
+    disabled: false
+  - name: bt4g
+    engine: bt4g
+    shortcut: bt4g
+    disabled: false
+
+  # --- Finance ---
+  - name: yahoo_finance
+    engine: yahoo_finance
+    shortcut: yfi
+    disabled: false
+
+  # --- Social ---
+  - name: reddit
+    engine: reddit
+    shortcut: re
+    disabled: false
+  - name: mastodon
+    engine: mastodon
+    shortcut: ma
+    disabled: false
+  - name: twitter
+    engine: twitter
+    shortcut: tw
+    disabled: false
+
+  # --- Currency / Conversion ---
+  - name: openaire
+    engine: openaire
+    shortcut: oa
+    disabled: false
+
+outgoing:
+  request_timeout: 15.0
+  max_request_timeout: 30.0
+  useragent_suffix: ""
+  enable_http2: true
