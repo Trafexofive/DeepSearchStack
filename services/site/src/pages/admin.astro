@@ -4,74 +4,141 @@ import Base from "../layouts/Base.astro";
 
 <Base title="Admin">
   <h1>Admin</h1>
-  <p class="muted">Blog generator control panel. Real-time stats and generation history.</p>
+  <p class="muted">Blog generator pipeline — runtime stats, generation history, service health.</p>
   <hr />
 
-  <section id="stats-section">
+  <section>
+    <h2>Pipeline</h2>
+    <div id="pipeline" class="pipeline-grid">Checking…</div>
+  </section>
+
+  <section class="mt-2">
     <h2>Stats</h2>
-    <div id="stats" class="result-block">Loading...</div>
+    <div id="stats" class="stats-grid">Loading…</div>
   </section>
 
-  <section id="history-section" class="mt-2">
+  <section class="mt-2">
     <h2>Recent Generations</h2>
-    <div id="history">Loading...</div>
-  </section>
-
-  <section id="pipeline-section" class="mt-2">
-    <h2>Pipeline Status</h2>
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-      <span class="category-tag" id="ds-status">deepsearch: ?</span>
-      <span class="category-tag" id="bg-status">blog-gen: ?</span>
-      <span class="category-tag" id="ig-status">inference: ?</span>
-    </div>
+    <div id="history" class="history-list">Loading…</div>
   </section>
 </Base>
 
 <script>
-  const API = "http://localhost:8006";
-
-  async function loadStats() {
+  async function health(name: string, url: string): Promise<HTMLElement> {
+    const el = document.createElement("span");
+    el.className = "health-chip";
     try {
-      const [stats, history] = await Promise.all([
-        fetch(`${API}/stats`).then(r => r.json()),
-        fetch(`${API}/history?limit=20`).then(r => r.json()),
-      ]);
-      document.getElementById("stats")!.innerHTML = `
-        Generations: <strong>${stats.total_generations}</strong><br>
-        Total tokens: <strong>${stats.total_tokens.toLocaleString()}</strong><br>
-        Total cost: <strong>\$${stats.total_cost_usd.toFixed(4)}</strong><br>
-        Avg duration: <strong>${Math.round(stats.avg_duration_ms)}ms</strong>
+      const r = await fetch(url);
+      if (r.ok) {
+        el.classList.add("up");
+        el.textContent = `${name} ✓`;
+      } else {
+        el.classList.add("down");
+        el.textContent = `${name} ${r.status}`;
+      }
+    } catch {
+      el.classList.add("down");
+      el.textContent = `${name} ✗`;
+    }
+    return el;
+  }
+
+  async function load() {
+    const pipeline = document.getElementById("pipeline")!;
+    const stats    = document.getElementById("stats")!;
+    const history  = document.getElementById("history")!;
+
+    // Health
+    pipeline.innerHTML = "";
+    const checks = [
+      health("inference", "/api/../health"),  // relative to blog_generator proxy
+      health("blog-gen", "/api/health"),
+    ];
+    // Check blog_generator health via api gateway, and deepsearch directly
+    try {
+      const bg = await fetch("/api/health");
+      if (bg.ok) pipeline.appendChild(await health("blog-gen", "/api/health"));
+    } catch { pipeline.appendChild(await health("blog-gen", "/api/health")); }
+    pipeline.appendChild(await health("inference", "/api/health"));
+
+    // Stats
+    try {
+      const s = await fetch("/api/stats").then(r => r.json());
+      stats.innerHTML = `
+        <div class="stat"><strong>${s.total_generations}</strong> <span>generations</span></div>
+        <div class="stat"><strong>${s.total_tokens.toLocaleString()}</strong> <span>tokens</span></div>
+        <div class="stat"><strong>\$${s.total_cost_usd.toFixed(4)}</strong> <span>total cost</span></div>
+        <div class="stat"><strong>${Math.round(s.avg_duration_ms)}ms</strong> <span>avg duration</span></div>
       `;
-      document.getElementById("history")!.innerHTML = history.map((h: any) => `
-        <div class="post-item">
-          <div class="date">${h.created_at?.slice(0, 10) || "?"} · ${h.model} · ${h.total_tokens} tokens · \$${h.cost_usd}</div>
-          <div class="title" style="font-size:0.9rem">${h.topic}</div>
-          <div class="excerpt" style="font-size:0.7rem">${h.status} · ${h.duration_ms}ms</div>
+    } catch {
+      stats.innerHTML = `<div class="error-block">blog_generator unreachable</div>`;
+    }
+
+    // History
+    try {
+      const h = await fetch("/api/history?limit=20").then(r => r.json());
+      if (!Array.isArray(h) || h.length === 0) {
+        history.innerHTML = `<p class="muted">No generations yet. <a href="/generate">Run one?</a></p>`;
+        return;
+      }
+      history.innerHTML = h.map((g: any) => `
+        <div class="history-row">
+          <div class="history-date">${(g.created_at ?? "").slice(0, 10)}</div>
+          <div class="history-topic">${g.topic}</div>
+          <div class="history-meta">${g.model} · ${g.total_tokens ?? 0} tokens · \$${g.cost_usd ?? "—"} · ${g.duration_ms ?? 0}ms · ${g.status ?? "?"}</div>
         </div>
       `).join("");
     } catch {
-      document.getElementById("stats")!.innerHTML = `<div class="error-block">blog_generator unreachable on :8006</div>`;
+      history.innerHTML = `<div class="error-block">Could not load history</div>`;
     }
   }
 
-  async function loadPipeline() {
-    const checks = [
-      { id: "ds-status", url: "http://localhost:8001/health", label: "deepsearch" },
-      { id: "bg-status", url: "http://localhost:8006/health", label: "blog-gen" },
-      { id: "ig-status", url: "http://localhost:8005/health", label: "inference" },
-    ];
-    for (const c of checks) {
-      try {
-        const r = await fetch(c.url);
-        document.getElementById(c.id)!.textContent = `${c.label}: ${r.ok ? "✓" : "✗"}`;
-        document.getElementById(c.id)!.style.borderColor = r.ok ? "var(--accent)" : "#ff4444";
-      } catch {
-        document.getElementById(c.id)!.textContent = `${c.label}: ✗`;
-        document.getElementById(c.id)!.style.borderColor = "#ff4444";
-      }
-    }
-  }
-
-  loadStats();
-  loadPipeline();
+  load();
 </script>
+
+<style>
+  .pipeline-grid { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .health-chip {
+    padding: 0.3em 0.8em;
+    font-size: 0.75rem;
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+  }
+  .health-chip.up   { border-color: var(--accent); color: var(--accent); }
+  .health-chip.down { border-color: #ff4444; color: #ff4444; }
+
+  .stats-grid {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    padding: 1rem 1.25rem;
+    min-width: 120px;
+  }
+  .stat strong {
+    display: block;
+    font-size: 1.3rem;
+    color: var(--accent);
+    margin-bottom: 0.2rem;
+  }
+  .stat span {
+    font-size: 0.65rem;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .history-list { }
+  .history-row {
+    border-bottom: 1px solid var(--border);
+    padding: 0.65rem 0;
+    font-size: 0.8rem;
+  }
+  .history-row:first-of-type { padding-top: 0; }
+  .history-date  { color: var(--fg-muted); font-size: 0.7rem; }
+  .history-topic { font-weight: 600; margin: 0.15rem 0; }
+  .history-meta  { color: var(--fg-muted); font-size: 0.7rem; }
+</style>

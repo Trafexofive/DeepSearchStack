@@ -1,5 +1,6 @@
 ---
 import { SITE } from "../site.config";
+import "../styles/global.css";
 
 const { title } = Astro.props as { title?: string };
 const pageTitle = title ? `${title} :: ${SITE.title}` : SITE.title;

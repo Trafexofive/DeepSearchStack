@@ -4,108 +4,193 @@ import Base from "../layouts/Base.astro";
 
 <Base title="Generate">
   <h1>Generate</h1>
-  <p class="muted">AI-powered blog generation via Substrate inference pipeline. Research-backed, with real sources and citations.</p>
+  <p class="muted">AI-powered blog generation via Substrate inference pipeline. Research-backed, cited, production-grade.</p>
   <hr />
 
-  <div class="generate-form">
+  <form id="generate-form" class="generate-form">
     <label for="topic">Topic</label>
-    <input type="text" id="topic" placeholder="e.g. Zero-dependency async runtime design in Rust" />
+    <input
+      type="text"
+      id="topic"
+      name="topic"
+      placeholder="e.g. Zero-dependency async runtime design in Rust"
+      required
+      minlength="10"
+    />
 
-    <label for="style">Style</label>
-    <select id="style">
-      <option value="technical">Technical — precise, code examples, senior eng</option>
-      <option value="tutorial">Tutorial — step-by-step, prerequisites, working code</option>
-      <option value="thought">Thought — exploratory, opinionated, trade-offs</option>
-    </select>
+    <div class="form-row">
+      <div class="form-col">
+        <label for="style">Style</label>
+        <select id="style" name="style">
+          <option value="technical">Technical — precise, code examples</option>
+          <option value="tutorial">Tutorial — step-by-step, working code</option>
+          <option value="thought">Thought — exploratory, opinionated</option>
+        </select>
+      </div>
+      <div class="form-col">
+        <label for="mode">Mode</label>
+        <select id="mode" name="mode">
+          <option value="researched">Researched — DeepSearch + generate</option>
+          <option value="simple">Simple — direct LLM generation</option>
+        </select>
+      </div>
+    </div>
 
-    <label for="mode">Mode</label>
-    <select id="mode">
-      <option value="researched">Researched — DeepSearch → sources → generate</option>
-      <option value="simple">Simple — direct LLM generation (no research)</option>
-    </select>
-
-    <details style="margin-top:1rem">
-      <summary style="cursor:pointer;font-size:0.75rem;color:var(--fg-muted);text-transform:uppercase">Advanced options</summary>
-      <label for="model">Model</label>
-      <select id="model">
-        <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-        <option value="deepseek-chat">deepseek-chat</option>
-        <option value="deepseek-reasoner">deepseek-reasoner</option>
-      </select>
-      <label for="max_tokens">Max tokens</label>
-      <input type="number" id="max_tokens" value="2048" min="256" max="8192" />
-      <label for="temperature">Temperature</label>
-      <input type="number" id="temperature" value="0.7" min="0" max="2" step="0.1" />
+    <details class="advanced-options">
+      <summary>Advanced</summary>
+      <div class="form-row">
+        <div class="form-col">
+          <label for="model">Model</label>
+          <select id="model" name="model">
+            <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+            <option value="deepseek-chat">deepseek-chat</option>
+            <option value="deepseek-reasoner">deepseek-reasoner</option>
+          </select>
+        </div>
+        <div class="form-col">
+          <label for="max_tokens">Max tokens</label>
+          <input type="number" id="max_tokens" name="max_tokens" value="2048" min="256" max="8192" />
+        </div>
+        <div class="form-col">
+          <label for="temperature">Temperature</label>
+          <input type="number" id="temperature" name="temperature" value="0.7" min="0" max="2" step="0.1" />
+        </div>
+      </div>
     </details>
 
-    <button id="generate-btn" onclick="generate()">▶ Generate</button>
-  </div>
+    <button type="submit" id="generate-btn">▶ Generate</button>
+  </form>
 
-  <div id="status" style="display:none" class="muted" style="margin:1rem 0;font-size:0.8rem"></div>
-  <div id="result" style="display:none"></div>
+  <div id="status" class="status-bar"></div>
+  <article id="result" class="generated-post"></article>
 </Base>
 
 <script>
-  const API = "http://localhost:8006";
-  // In production: relative URL or env-configured endpoint
+  function show(el)  { (document.getElementById(el) as HTMLElement).style.display = "block"; }
+  function hide(el)  { (document.getElementById(el) as HTMLElement).style.display = "none"; }
+  function set(el, s) { document.getElementById(el)!.textContent = s; }
 
-  async function generate() {
-    const btn = document.getElementById("generate-btn") as HTMLButtonElement;
-    const status = document.getElementById("status")!;
-    const result = document.getElementById("result")!;
+  const form = document.getElementById("generate-form") as HTMLFormElement;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
 
-    const topic = (document.getElementById("topic") as HTMLInputElement).value.trim();
-    if (!topic) { alert("Enter a topic"); return; }
+    const btn   = document.getElementById("generate-btn") as HTMLButtonElement;
+    const stat  = document.getElementById("status")!;
+    const out   = document.getElementById("result")!;
 
-    const mode = (document.getElementById("mode") as HTMLSelectElement).value;
-    const endpoint = mode === "researched" ? "/generate-researched" : "/generate";
-    const style = (document.getElementById("style") as HTMLSelectElement).value;
-    const model = (document.getElementById("model") as HTMLSelectElement)?.value || "deepseek-v4-flash";
-    const maxTokens = parseInt((document.getElementById("max_tokens") as HTMLInputElement)?.value || "2048");
-    const temperature = parseFloat((document.getElementById("temperature") as HTMLInputElement)?.value || "0.7");
+    const topic       = (document.getElementById("topic")       as HTMLInputElement).value.trim();
+    const style       = (document.getElementById("style")       as HTMLSelectElement).value;
+    const mode        = (document.getElementById("mode")        as HTMLSelectElement).value;
+    const model       = (document.getElementById("model")       as HTMLSelectElement).value;
+    const maxTokens   = parseInt((document.getElementById("max_tokens")   as HTMLInputElement).value || "2048");
+    const temperature = parseFloat((document.getElementById("temperature") as HTMLInputElement).value || "0.7");
+
+    const endpoint = mode === "researched" ? "/api/generate-researched" : "/api/generate";
 
     btn.disabled = true;
-    btn.textContent = "⏳ Generating...";
-    status.style.display = "block";
-    status.textContent = mode === "researched" ? "Researching topic..." : "Generating...";
-    result.style.display = "none";
-    result.innerHTML = "";
+    btn.textContent = "⏳ Generating…";
+    stat.className = "status-bar";
+    stat.textContent = mode === "researched" ? "Researching topic…" : "Generating…";
+    hide("result");
+    out.innerHTML = "";
 
     try {
-      const start = Date.now();
-      const resp = await fetch(`${API}${endpoint}`, {
+      const t0 = performance.now();
+      const resp = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ topic, style, model, max_tokens: maxTokens, temperature }),
       });
-      const data = await resp.json();
-      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 
-      if (resp.ok) {
-        result.innerHTML = `
-          <div class="result-block">
-            <div class="muted" style="margin-bottom:0.5rem">
-              ${data.model} · ${data.usage.total_tokens} tokens · \$${data.cost_usd} · ${elapsed}s
-              ${data.sources?.length ? `· ${data.sources.length} sources` : ""}
-            </div>
-            ${data.sources?.length ? `<div class="muted" style="margin-bottom:1rem;font-size:0.75rem">Sources: ${data.sources.map((s: any) => s.title).join(", ")}</div>` : ""}
-            <hr style="margin:0.5rem 0" />
-            ${data.content.replace(/\n/g, "<br>")}
-          </div>`;
-        result.style.display = "block";
-        status.textContent = `✅ Done — ${elapsed}s`;
-      } else {
-        result.innerHTML = `<div class="error-block">${data.detail || "Generation failed"}</div>`;
-        result.style.display = "block";
-        status.textContent = "❌ Failed";
+      const data = await resp.json();
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+
+      if (!resp.ok) {
+        stat.textContent = `Generation failed (${resp.status})`;
+        stat.className = "status-bar error";
+        out.innerHTML = `<div class="error-block">${data.detail ?? "Unknown error"}</div>`;
+        show("result");
+        return;
       }
-    } catch (e: any) {
-      result.innerHTML = `<div class="error-block">${e.message || "Network error — is blog_generator running on :8006?"}</div>`;
-      result.style.display = "block";
-      status.textContent = "❌ Connection error";
+
+      set("status", `✅ ${data.model} · ${data.usage?.total_tokens} tokens · \$${data.cost_usd} · ${elapsed}s${data.sources ? ` · ${data.sources.length} sources` : ""}`);
+      stat.className = "status-bar ok";
+
+      let sourcesHtml = "";
+      if (data.sources?.length) {
+        sourcesHtml = `<section class="sources"><h2>Sources</h2><ol>${data.sources.map((s: any) => `<li><a href="${s.url || "#"}" rel="nofollow">${s.title}</a></li>`).join("")}</ol></section>`;
+      }
+
+      out.innerHTML = `
+        <header class="post-meta">
+          <span class="category-tag">${style}</span> · ${data.model} · ${data.usage?.total_tokens} tokens · \$${data.cost_usd}
+        </header>
+        ${sourcesHtml}
+        <div class="content">${data.content}</div>
+      `;
+      show("result");
+    } catch (err: any) {
+      stat.textContent = "Connection error — is blog_generator running?";
+      stat.className = "status-bar error";
+      out.innerHTML = `<div class="error-block">${err.message}</div>`;
+      show("result");
     } finally {
       btn.disabled = false;
       btn.textContent = "▶ Generate";
     }
-  }
+  });
 </script>
+
+<style>
+  .form-row  { display: flex; gap: 1rem; margin-top: 0.5rem; }
+  .form-col  { flex: 1; }
+  .advanced-options {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .advanced-options summary {
+    cursor: pointer;
+    font-size: 0.7rem;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .status-bar {
+    margin: 1rem 0;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.78rem;
+    border-left: 2px solid var(--border);
+    display: none;
+  }
+  .status-bar.ok     { border-color: var(--accent); display: block; }
+  .status-bar.error  { border-color: #ff4444; color: #ff6666; display: block; }
+  .generated-post {
+    display: none;
+    margin-top: 2rem;
+    border-top: 1px solid var(--border);
+    padding-top: 2rem;
+  }
+  .generated-post .sources {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .generated-post .sources h2 {
+    margin-top: 0;
+    font-size: 0.9rem;
+    color: var(--fg-muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .generated-post .sources ol { margin-bottom: 0; }
+  .generated-post .sources a { color: var(--fg); border-bottom: 1px solid var(--border); }
+  .generated-post .content { font-size: 0.9rem; line-height: 1.8; }
+  .generated-post .content p { margin-bottom: 1.2rem; }
+  .generated-post .content h1,
+  .generated-post .content h2,
+  .generated-post .content h3 { margin-top: 2rem; }
+  .generated-post .content pre { font-size: 0.8rem; }
+</style>

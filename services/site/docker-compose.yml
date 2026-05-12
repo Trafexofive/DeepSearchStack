@@ -5,6 +5,8 @@ services:
       - "${SITE_PORT:-8080}:80"
     networks:
       - substrate-net
+    extra_hosts:
+      - host.docker.internal:host-gateway
 
 networks:
   substrate-net:
