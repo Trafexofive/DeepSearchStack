@@ -1,5 +1,6 @@
 ---
 import Base from "../../layouts/Base.astro";
+import { SITE } from "../../site.config";
 
 export async function getStaticPaths() {
   const modules = import.meta.glob("/src/content/posts/*.mdx", { eager: true });
@@ -14,15 +15,26 @@ export async function getStaticPaths() {
 
 const { slug, frontmatter, Content } = Astro.props;
 const date = new Date(frontmatter.date);
+const dateISO = date.toISOString();
 ---
 
-<Base title={frontmatter.title}>
+<Base
+  title={frontmatter.title}
+  description={frontmatter.excerpt ?? ""}
+  type="article"
+  canonicalURL={`${SITE.url}/posts/${slug}/`}
+  publishedTime={dateISO}
+  modifiedTime={frontmatter.modified ? new Date(frontmatter.modified).toISOString() : dateISO}
+  authorName={frontmatter.author ?? "Substrate"}
+  tags={[frontmatter.category, ...(frontmatter.tags || [])]}
+>
   <article>
     <header class="article-header">
       <div class="article-meta">
         <a href={`/${frontmatter.category === "guide" ? "guides" : frontmatter.category + "s"}`} class="chip chip-category">{frontmatter.category}</a>
-        <time datetime={date.toISOString()}>{date.toISOString().slice(0, 10)}</time>
+        <time datetime={dateISO}>{dateISO.slice(0, 10)}</time>
         {frontmatter.author && frontmatter.author !== "Substrate" && ` · by ${frontmatter.author}`}
+        {frontmatter.modified && ` · updated ${new Date(frontmatter.modified).toISOString().slice(0, 10)}`}
       </div>
 
       <h1 class="article-title">{frontmatter.title}</h1>
