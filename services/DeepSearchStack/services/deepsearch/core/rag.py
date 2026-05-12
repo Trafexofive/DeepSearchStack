@@ -1,6 +1,7 @@
 """RAG stage — embed, chunk, and retrieve relevant content via vector-store."""
 import hashlib
 import logging
+import re
 from typing import List
 
 from models import ScrapedContent, VectorChunk
@@ -8,16 +9,33 @@ from config import config
 
 logger = logging.getLogger("deepsearch.rag")
 
+_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
 
-def split_into_chunks(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
-    """Split text into overlapping chunks for embedding."""
+
+def split_into_chunks(text: str, chunk_size: int = 1000, overlap_sentences: int = 2) -> List[str]:
+    """Split text into sentence-aware overlapping chunks for embedding."""
+    sentences = _SENTENCE_RE.split(text)
+    if not sentences:
+        return []
+
     chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start = end - overlap
-    return chunks
+    current_chunk = []
+    current_length = 0
+
+    for i, sentence in enumerate(sentences):
+        sent_len = len(sentence)
+        if current_length + sent_len > chunk_size and current_chunk:
+            chunks.append(" ".join(current_chunk))
+            # Keep overlap_sentences sentences for context overlap
+            current_chunk = current_chunk[-overlap_sentences:] if len(current_chunk) > overlap_sentences else []
+            current_length = sum(len(s) for s in current_chunk)
+        current_chunk.append(sentence)
+        current_length += sent_len
+
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+
+    return chunks or [text]
 
 
 async def embed(client, query: str, scraped_content: List[ScrapedContent], vector_store_url: str):

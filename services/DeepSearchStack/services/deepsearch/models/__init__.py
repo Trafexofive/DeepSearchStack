@@ -22,9 +22,10 @@ class SortMethod(str, Enum):
 
 
 class LLMProvider(str, Enum):
-    OLLAMA = "ollama"
-    GROQ = "groq"
-    GEMINI = "gemini"
+    """Available LLM providers via inference-gateway."""
+    DEEPSEEK = "deepseek"
+    DEEPSEEK_CHAT = "deepseek-chat"
+    DEEPSEEK_REASONER = "deepseek-reasoner"
 
 
 # --- Core Models ---

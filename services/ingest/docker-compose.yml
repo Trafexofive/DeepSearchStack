@@ -1,0 +1,25 @@
+services:
+  ingest:
+    build: .
+    ports:
+      - "${INGEST_PORT:-8008}:8008"
+    volumes:
+      - ./config:/app/config:ro
+      - ./output:/app/output
+      - ./volumes/data:/app/volumes/data
+    environment:
+      - INGEST_CONFIG=/app/config/feeds.yml
+      - INGEST_OUTPUT_DIR=/app/output
+      - CRAWLER_URL=http://dss-crawler:8004
+      - BLOG_GENERATOR_URL=http://infra-blog_generator-1:8006
+    networks:
+      - deepsearch_net
+      - infra-net
+    restart: unless-stopped
+
+networks:
+  deepsearch_net:
+    external: true
+  infra-net:
+    external: true
+    name: infra_substrate-net
