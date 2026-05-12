@@ -1,0 +1,80 @@
+---
+title: "Demystifying LLM Inference: Tokens, Context Windows, and KV Caches"
+date: 2026-05-10
+category: "research"
+tags: ["llm", "inference", "transformers", "kv-cache"]
+excerpt: "A deep dive into how LLMs generate text — from tokenization to the key-value cache that makes autoregressive generation fast."
+---
+
+Large language models generate text one token at a time. This post breaks down
+the inference pipeline — what actually happens between your prompt and the first
+response character.
+
+## Tokenization: From Text to Numbers
+
+Before an LLM sees your prompt, a tokenizer splits it into tokens — sub-word
+units that map to integer IDs. GPT-family models use BPE (Byte-Pair Encoding).
+For example, "demystifying" might tokenize as `["dem", "yst", "ifying"]`.
+
+Each token ID indexes into an embedding matrix — a learned lookup table that
+maps every token in the vocabulary (typically 50K–256K entries) to a dense
+vector (768–8192 dimensions).
+
+```python
+# Simplified: embedding lookup
+embedding = embedding_matrix[token_id]  # shape: (d_model,)
+```
+
+## The Attention Mechanism
+
+The core operation is scaled dot-product attention:
+
+```
+Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) V
+```
+
+For every token, the model computes:
+1. A **query** vector (what am I looking for?)
+2. A **key** vector (what do I contain?)
+3. A **value** vector (what is my content?)
+
+The attention score between token i and token j is the dot product of query_i
+and key_j, scaled by `1/sqrt(d_k)` to prevent vanishing gradients.
+
+## KV Cache: Why Autoregressive Generation Is Fast
+
+During training, the model sees all tokens at once (teacher forcing). But during
+inference, we generate sequentially — we can't look at future tokens.
+
+The naive approach: recompute attention for all previous tokens at each step.
+For a 4096-token context window, that's O(n²) work per token.
+
+The **KV cache** stores computed key and value vectors for previous tokens.
+When generating token t+1, we only compute Q, K, V for the new token, then
+concatenate with cached K and V from tokens 0..t.
+
+This reduces per-token work from O(n²) to O(n), making generation practical.
+
+## Context Windows: The Hard Limit
+
+Most models have a fixed context window — the maximum number of tokens they can
+attend to. Exceed it and you either get truncated input or garbled output.
+
+- Llama 3: 8K tokens
+- GPT-4 Turbo: 128K tokens  
+- Claude 3: 200K tokens
+- Gemini 1.5 Pro: 1M+ tokens
+
+Longer context windows require quadratic memory for the attention matrix, which
+is why techniques like sliding window attention, sparse attention, and ring
+attention exist.
+
+## Practical Takeaway
+
+When deploying LLMs, monitor:
+1. **TTFT** (Time to First Token) — how long before the first response char
+2. **TPS** (Tokens Per Second) — generation throughput
+3. **KV cache memory** — grows linearly with context length
+
+For production, always use a KV cache-compatible inference engine (vLLM,
+TensorRT-LLM, llama.cpp). Never roll your own unless you're doing research.

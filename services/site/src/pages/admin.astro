@@ -1,0 +1,77 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Admin">
+  <h1>Admin</h1>
+  <p class="muted">Blog generator control panel. Real-time stats and generation history.</p>
+  <hr />
+
+  <section id="stats-section">
+    <h2>Stats</h2>
+    <div id="stats" class="result-block">Loading...</div>
+  </section>
+
+  <section id="history-section" class="mt-2">
+    <h2>Recent Generations</h2>
+    <div id="history">Loading...</div>
+  </section>
+
+  <section id="pipeline-section" class="mt-2">
+    <h2>Pipeline Status</h2>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+      <span class="category-tag" id="ds-status">deepsearch: ?</span>
+      <span class="category-tag" id="bg-status">blog-gen: ?</span>
+      <span class="category-tag" id="ig-status">inference: ?</span>
+    </div>
+  </section>
+</Base>
+
+<script>
+  const API = "http://localhost:8006";
+
+  async function loadStats() {
+    try {
+      const [stats, history] = await Promise.all([
+        fetch(`${API}/stats`).then(r => r.json()),
+        fetch(`${API}/history?limit=20`).then(r => r.json()),
+      ]);
+      document.getElementById("stats")!.innerHTML = `
+        Generations: <strong>${stats.total_generations}</strong><br>
+        Total tokens: <strong>${stats.total_tokens.toLocaleString()}</strong><br>
+        Total cost: <strong>\$${stats.total_cost_usd.toFixed(4)}</strong><br>
+        Avg duration: <strong>${Math.round(stats.avg_duration_ms)}ms</strong>
+      `;
+      document.getElementById("history")!.innerHTML = history.map((h: any) => `
+        <div class="post-item">
+          <div class="date">${h.created_at?.slice(0, 10) || "?"} · ${h.model} · ${h.total_tokens} tokens · \$${h.cost_usd}</div>
+          <div class="title" style="font-size:0.9rem">${h.topic}</div>
+          <div class="excerpt" style="font-size:0.7rem">${h.status} · ${h.duration_ms}ms</div>
+        </div>
+      `).join("");
+    } catch {
+      document.getElementById("stats")!.innerHTML = `<div class="error-block">blog_generator unreachable on :8006</div>`;
+    }
+  }
+
+  async function loadPipeline() {
+    const checks = [
+      { id: "ds-status", url: "http://localhost:8001/health", label: "deepsearch" },
+      { id: "bg-status", url: "http://localhost:8006/health", label: "blog-gen" },
+      { id: "ig-status", url: "http://localhost:8005/health", label: "inference" },
+    ];
+    for (const c of checks) {
+      try {
+        const r = await fetch(c.url);
+        document.getElementById(c.id)!.textContent = `${c.label}: ${r.ok ? "✓" : "✗"}`;
+        document.getElementById(c.id)!.style.borderColor = r.ok ? "var(--accent)" : "#ff4444";
+      } catch {
+        document.getElementById(c.id)!.textContent = `${c.label}: ✗`;
+        document.getElementById(c.id)!.style.borderColor = "#ff4444";
+      }
+    }
+  }
+
+  loadStats();
+  loadPipeline();
+</script>

@@ -1,0 +1,78 @@
+---
+title: "DeepSeek R1: The Open-Weight Reasoning Model That Changes Everything"
+date: 2026-05-08
+category: "news"
+tags: ["deepseek", "reasoning", "open-source", "llm"]
+excerpt: "DeepSeek released R1 — a 671B Mixture-of-Experts reasoning model with open weights. Here's what makes it special and why it matters for FOSS AI."
+---
+
+DeepSeek released R1 in January 2025 — a 671B-parameter Mixture-of-Experts
+model with open weights under the MIT license. This is the first large-scale
+reasoning model available without restriction.
+
+## Architecture
+
+R1 uses a MoE architecture with 37B active parameters per token out of 671B
+total. This means inference is far cheaper than the parameter count suggests —
+roughly equivalent to a 37B dense model in FLOPs per token.
+
+The model was trained with reinforcement learning on reasoning traces before
+any supervised fine-tuning. This "RL-first" approach produced emergent chain-of-thought
+reasoning without explicit CoT training data.
+
+## What "Reasoning" Means
+
+R1 doesn't just predict the next token — it generates an internal reasoning
+trace before producing the final answer. You can see this in the API responses
+as `reasoning_content`:
+
+```json
+{
+  "choices": [{
+    "delta": {
+      "reasoning_content": "The user is asking about R1...",
+      "content": "R1 is a reasoning model..."
+    }
+  }]
+}
+```
+
+The model can think for hundreds of tokens before answering, dramatically
+improving performance on math, coding, and logic problems.
+
+## FOSS Impact
+
+This is a turning point for open-source AI:
+- **MIT license** — no restrictions, commercial use allowed
+- **Open weights** — you can run it yourself (if you have ~400GB VRAM)
+- **Distilled variants** — 1.5B, 7B, 8B, 14B, 32B, 70B versions trained on R1 outputs
+
+The distilled 32B model outperforms GPT-4o on several reasoning benchmarks
+while running on consumer hardware via llama.cpp or Ollama.
+
+## Benchmarks
+
+| Model | MATH-500 | AIME 2024 | Codeforces |
+|-------|----------|-----------|------------|
+| DeepSeek-R1 | 97.3% | 79.8% | 96.3% |
+| GPT-4o | 76.6% | 9.3% | 90.2% |
+| Claude 3.5 Sonnet | 78.3% | 16.0% | 92.0% |
+| Llama 3.1 405B | 73.8% | 15.0% | 83.0% |
+
+DeepSeek-R1 is competitive with or exceeds proprietary models on STEM reasoning
+tasks, and it's free to use, modify, and distribute.
+
+## Running It Yourself
+
+```bash
+ollama pull deepseek-r1:32b
+ollama run deepseek-r1:32b
+```
+
+Or via the DeepSeek API (which Substrate's inference-gateway supports):
+
+```bash
+curl http://localhost:8005/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"What is FOSS?"}]}'
+```

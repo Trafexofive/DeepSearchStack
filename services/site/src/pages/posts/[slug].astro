@@ -1,0 +1,41 @@
+---
+import Base from "../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const modules = import.meta.glob("/src/content/posts/*.mdx", { eager: true });
+  return Object.entries(modules).map(([path, mod]: [string, any]) => {
+    const slug = path.split("/").pop()?.replace(".mdx", "") || "";
+    return {
+      params: { slug },
+      props: {
+        post: {
+          slug,
+          ...mod.frontmatter,
+          date: mod.frontmatter.date?.toISOString?.() || mod.frontmatter.date,
+        },
+        Content: mod.default,
+      },
+    };
+  });
+}
+
+const { post, Content } = Astro.props;
+---
+
+<Base title={post.title}>
+  <article class="post">
+    <header>
+      <div class="post-meta">
+        <span class="category-tag">{post.category}</span>
+        <time datetime={post.date}>{post.date?.slice?.(0, 10) || post.date}</time>
+        {post.author !== "Substrate" ? ` · ${post.author}` : null}
+      </div>
+      <h1>{post.title}</h1>
+      {post.excerpt && <p class="muted">{post.excerpt}</p>}
+      {(post.tags || []).length > 0 && (
+        <div style="margin-top:0.5rem">{(post.tags as string[]).map(t => <span class="tag">{t}</span>)}</div>
+      )}
+    </header>
+    <Content />
+  </article>
+</Base>

@@ -1,0 +1,26 @@
+---
+import Base from "../layouts/Base.astro";
+
+const allPosts = Object.entries(import.meta.glob("/src/content/posts/*.mdx", { eager: true }))
+  .map(([path, mod]: [string, any]) => ({
+    slug: path.split("/").pop()?.replace(".mdx", "") || "",
+    ...mod.frontmatter,
+  }))
+  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+---
+
+<Base title="Archive">
+  <h1>Archive</h1>
+  <p class="muted">{allPosts.length} posts total</p>
+  <hr />
+
+  {allPosts.map(post => (
+    <article class="post-item">
+      <div class="date">{new Date(post.date).toISOString().slice(0, 10)}</div>
+      <a href={`/posts/${post.slug}`} class="title">{post.title}</a>
+      <span class="category-tag">{post.category}</span>
+      {post.excerpt && <p class="excerpt">{post.excerpt}</p>}
+      {(post.tags as string[]).map(t => <span class="tag">{t}</span>)}
+    </article>
+  ))}
+</Base>

@@ -1,0 +1,112 @@
+---
+import Base from "../layouts/Base.astro";
+import { SITE } from "../site.config";
+
+const allPosts = Object.entries(import.meta.glob("/src/content/posts/*.mdx", { eager: true }))
+  .map(([path, mod]: [string, any]) => {
+    const slug = path.split("/").pop()?.replace(".mdx", "") || "";
+    return { slug, ...mod.frontmatter, Content: mod.default };
+  })
+  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+const latest = allPosts.slice(0, 8);
+const greeting = `$ ssh ${SITE.title.toLowerCase()}.pub
+> ${SITE.tagline}
+> ${allPosts.length} posts · ${allPosts.filter(p => p.category === "news").length} news · ${allPosts.filter(p => p.category === "guide").length} guides
+$ _`;
+---
+
+<Base>
+  <section class="terminal-intro">
+    <pre><code>{greeting}</code></pre>
+  </section>
+
+  <section class="category-grid mt-2">
+    {
+      [
+        { cat: "news", label: "News", icon: "📡", desc: "No-BS AI news. What actually matters." },
+        { cat: "guide", label: "Guides", icon: "📖", desc: "Deep walkthroughs, comparisons, tutorials." },
+        { cat: "benchmark", label: "Benchmarks", icon: "⚡", desc: "Hardware evals, model shootouts, raw data." },
+        { cat: "research", label: "Research", icon: "🔬", desc: "Papers demystified. LLMs explained." },
+        { cat: "opinion", label: "Opinion", icon: "🗣", desc: "Based takes. FOSS maximalism. No filter." },
+      ].map(({ cat, label, icon, desc }) => {
+        const count = allPosts.filter(p => p.category === cat).length;
+        return (
+          <a href={`/${cat === "guide" ? "guides" : cat + "s"}`} class="category-card">
+            <span class="icon">{icon}</span>
+            <strong>{label}</strong>
+            <span class="count">{count} posts</span>
+            <p>{desc}</p>
+          </a>
+        );
+      })
+    }
+    <a href="/generate" class="category-card accent-border">
+      <span class="icon">🤖</span>
+      <strong>Generate</strong>
+      <span class="count">live</span>
+      <p>AI-powered blog generation. Research-backed, cited.</p>
+    </a>
+  </section>
+
+  <hr />
+
+  <section>
+    <h2>Latest</h2>
+    {latest.map(post => {
+      const Content = post.Content;
+      return (
+        <article class="post-item">
+          <div class="date">{new Date(post.date).toISOString().slice(0, 10)}</div>
+          <a href={`/posts/${post.slug}`} class="title">{post.title}</a>
+          <span class="category-tag">{post.category}</span>
+          {post.excerpt && <p class="excerpt">{post.excerpt}</p>}
+          {(post.tags as string[]).map(t => <span class="tag">{t}</span>)}
+        </article>
+      );
+    })}
+    {allPosts.length > 8 && <a href="/archive" class="muted">→ all {allPosts.length} posts</a>}
+  </section>
+</Base>
+
+<style>
+.terminal-intro {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  overflow-x: auto;
+}
+.terminal-intro pre {
+  margin: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+.terminal-intro code {
+  background: none;
+  color: var(--fg);
+}
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+}
+.category-card {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  padding: 1rem;
+  text-decoration: none;
+  color: var(--fg);
+  transition: border-color 0.15s;
+}
+.category-card:hover { border-color: var(--accent); }
+.category-card.accent-border { border-color: var(--accent-dim); }
+.category-card .icon { font-size: 1.4rem; display: block; margin-bottom: 0.5rem; }
+.category-card strong { display: block; margin-bottom: 0.15rem; }
+.category-card .count { font-size: 0.65rem; color: var(--accent); text-transform: uppercase; }
+.category-card p { font-size: 0.75rem; color: var(--fg-muted); margin-top: 0.3rem; margin-bottom: 0; }
+</style>

@@ -1,0 +1,44 @@
+---
+import { SITE } from "../site.config";
+
+const { title } = Astro.props as { title?: string };
+const pageTitle = title ? `${title} :: ${SITE.title}` : SITE.title;
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content={SITE.description} />
+  <title>{pageTitle}</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="alternate" type="application/rss+xml" title={SITE.title} href="/rss.xml" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a href="/" class="site-title">⊢ {SITE.title}</a>
+      <nav class="main-nav">
+        <a href="/news">news</a>
+        <a href="/guides">guides</a>
+        <a href="/benchmarks">benchmarks</a>
+        <a href="/research">research</a>
+        <a href="/generate">generate</a>
+        <a href="/archive">archive</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <slot />
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <span>{SITE.tagline} <a href="/rss.xml">rss</a></span>
+      <span class="muted">FOSS • no tracking • no JS bloat</span>
+    </div>
+  </footer>
+</body>
+</html>

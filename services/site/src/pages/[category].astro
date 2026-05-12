@@ -1,0 +1,43 @@
+---
+import Base from "../layouts/Base.astro";
+import { SITE } from "../site.config";
+
+interface Props { category: string; label: string; }
+const { category, label } = Astro.props;
+
+const allPosts = Object.entries(import.meta.glob("/src/content/posts/*.mdx", { eager: true }))
+  .map(([path, mod]: [string, any]) => ({
+    slug: path.split("/").pop()?.replace(".mdx", "") || "",
+    ...mod.frontmatter,
+  }))
+  .filter(p => p.category === category)
+  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+export async function getStaticPaths() {
+  return [
+    { params: { category: "news" }, props: { category: "news", label: "News" } },
+    { params: { category: "guides" }, props: { category: "guide", label: "Guides" } },
+    { params: { category: "benchmarks" }, props: { category: "benchmark", label: "Benchmarks" } },
+    { params: { category: "research" }, props: { category: "research", label: "Research" } },
+    { params: { category: "opinion" }, props: { category: "opinion", label: "Opinion" } },
+  ];
+}
+---
+
+<Base title={label}>
+  <h1>{label}</h1>
+  <p class="muted">{allPosts.length} posts</p>
+  <hr />
+
+  {allPosts.length === 0 ? <p class="muted">Nothing here yet. <a href="/generate">Generate one?</a></p> : null}
+
+  {allPosts.map(post => (
+    <article class="post-item">
+      <div class="date">{new Date(post.date).toISOString().slice(0, 10)}</div>
+      <a href={`/posts/${post.slug}`} class="title">{post.title}</a>
+      <span class="category-tag">{post.category}</span>
+      {post.excerpt && <p class="excerpt">{post.excerpt}</p>}
+      {(post.tags as string[]).map(t => <span class="tag">{t}</span>)}
+    </article>
+  ))}
+</Base>

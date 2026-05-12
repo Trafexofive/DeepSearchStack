@@ -1,0 +1,11 @@
+services:
+  site:
+    build: .
+    ports:
+      - "${SITE_PORT:-8080}:80"
+    networks:
+      - substrate-net
+
+networks:
+  substrate-net:
+    external: true
