@@ -1,6 +1,5 @@
 ---
 import Base from "../layouts/Base.astro";
-import { SITE } from "../site.config";
 
 interface Props { category: string; label: string; }
 const { category, label } = Astro.props;
@@ -15,29 +14,35 @@ const allPosts = Object.entries(import.meta.glob("/src/content/posts/*.mdx", { e
 
 export async function getStaticPaths() {
   return [
-    { params: { category: "news" }, props: { category: "news", label: "News" } },
-    { params: { category: "guides" }, props: { category: "guide", label: "Guides" } },
-    { params: { category: "benchmarks" }, props: { category: "benchmark", label: "Benchmarks" } },
-    { params: { category: "research" }, props: { category: "research", label: "Research" } },
-    { params: { category: "opinion" }, props: { category: "opinion", label: "Opinion" } },
+    { params: { category: "news" },      props: { category: "news",      label: "News" } },
+    { params: { category: "guides" },    props: { category: "guide",     label: "Guides" } },
+    { params: { category: "benchmarks" },props: { category: "benchmark", label: "Benchmarks" } },
+    { params: { category: "research" },  props: { category: "research",  label: "Research" } },
+    { params: { category: "opinion" },   props: { category: "opinion",   label: "Opinion" } },
   ];
 }
 ---
 
 <Base title={label}>
   <h1>{label}</h1>
-  <p class="muted">{allPosts.length} posts</p>
-  <hr />
+  <p style="color:var(--border);font-size:var(--text-sm);margin-top:-1rem;margin-bottom:var(--space-6)">{allPosts.length} posts</p>
 
-  {allPosts.length === 0 ? <p class="muted">Nothing here yet. <a href="/generate">Generate one?</a></p> : null}
-
-  {allPosts.map(post => (
-    <article class="post-item">
-      <div class="date">{new Date(post.date).toISOString().slice(0, 10)}</div>
-      <a href={`/posts/${post.slug}`} class="title">{post.title}</a>
-      <span class="category-tag">{post.category}</span>
-      {post.excerpt && <p class="excerpt">{post.excerpt}</p>}
-      {(post.tags as string[]).map(t => <span class="tag">{t}</span>)}
-    </article>
-  ))}
+  {allPosts.length === 0 ? (
+    <div class="empty-state">
+      <p>Nothing published yet in this category.</p>
+      <p style="margin-top:var(--space-3)"><a href="/generate">→ generate the first one</a></p>
+    </div>
+  ) : (
+    <div class="post-feed">
+      {allPosts.map((post: any) => (
+        <article class="post-item">
+          <time class="post-date" datetime={new Date(post.date).toISOString()}>{new Date(post.date).toISOString().slice(0, 10)}</time>
+          <a href={`/posts/${post.slug}`} class="post-link">{post.title}</a>
+          <span class="chip chip-category">{post.category}</span>
+          {post.excerpt && <p class="post-excerpt">{post.excerpt}</p>}
+          {(post.tags as string[])?.map((t: string) => <span class="chip chip-tag">{t}</span>)}
+        </article>
+      ))}
+    </div>
+  )}
 </Base>

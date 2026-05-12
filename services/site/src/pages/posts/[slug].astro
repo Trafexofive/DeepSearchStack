@@ -7,35 +7,38 @@ export async function getStaticPaths() {
     const slug = path.split("/").pop()?.replace(".mdx", "") || "";
     return {
       params: { slug },
-      props: {
-        post: {
-          slug,
-          ...mod.frontmatter,
-          date: mod.frontmatter.date?.toISOString?.() || mod.frontmatter.date,
-        },
-        Content: mod.default,
-      },
+      props: { slug, frontmatter: mod.frontmatter, Content: mod.default },
     };
   });
 }
 
-const { post, Content } = Astro.props;
+const { slug, frontmatter, Content } = Astro.props;
+const date = new Date(frontmatter.date);
 ---
 
-<Base title={post.title}>
-  <article class="post">
-    <header>
-      <div class="post-meta">
-        <span class="category-tag">{post.category}</span>
-        <time datetime={post.date}>{post.date?.slice?.(0, 10) || post.date}</time>
-        {post.author !== "Substrate" ? ` · ${post.author}` : null}
+<Base title={frontmatter.title}>
+  <article>
+    <header class="article-header">
+      <div class="article-meta">
+        <a href={`/${frontmatter.category === "guide" ? "guides" : frontmatter.category + "s"}`} class="chip chip-category">{frontmatter.category}</a>
+        <time datetime={date.toISOString()}>{date.toISOString().slice(0, 10)}</time>
+        {frontmatter.author && frontmatter.author !== "Substrate" && ` · by ${frontmatter.author}`}
       </div>
-      <h1>{post.title}</h1>
-      {post.excerpt && <p class="muted">{post.excerpt}</p>}
-      {(post.tags || []).length > 0 && (
-        <div style="margin-top:0.5rem">{(post.tags as string[]).map(t => <span class="tag">{t}</span>)}</div>
+
+      <h1 class="article-title">{frontmatter.title}</h1>
+
+      {frontmatter.excerpt && <p style="color:var(--border);max-width:var(--measure-narrow);font-size:var(--text-sm);line-height:var(--leading);margin-bottom:var(--space-4)">{frontmatter.excerpt}</p>}
+
+      {(frontmatter.tags || []).length > 0 && (
+        <div>{(frontmatter.tags as string[]).map((t: string) => <span class="chip chip-tag">{t}</span>)}</div>
       )}
     </header>
-    <Content />
+
+    <div class="article-body">
+      <Content />
+    </div>
   </article>
+
+  <hr />
+  <p style="font-size:var(--text-xs)"><a href="/">← home</a> · <a href="/archive">archive</a> · <a href="/rss.xml">rss</a></p>
 </Base>

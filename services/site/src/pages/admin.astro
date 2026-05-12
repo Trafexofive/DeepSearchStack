@@ -4,141 +4,72 @@ import Base from "../layouts/Base.astro";
 
 <Base title="Admin">
   <h1>Admin</h1>
-  <p class="muted">Blog generator pipeline — runtime stats, generation history, service health.</p>
-  <hr />
+  <p style="color:var(--border);font-size:var(--text-sm);margin-top:-1rem;margin-bottom:var(--space-6)">Blog generator runtime — stats, history, pipeline health.</p>
 
-  <section>
-    <h2>Pipeline</h2>
-    <div id="pipeline" class="pipeline-grid">Checking…</div>
-  </section>
+  <h2 class="section-heading">Pipeline</h2>
+  <div class="pipeline-indicator" id="pipeline">
+    <span class="pipeline-chip">checking…</span>
+  </div>
 
-  <section class="mt-2">
-    <h2>Stats</h2>
-    <div id="stats" class="stats-grid">Loading…</div>
-  </section>
+  <h2 class="section-heading">Stats</h2>
+  <div class="stat-grid" id="stats-grid">
+    <div class="stat-card"><span class="stat-value">—</span><span class="stat-label">loading</span></div>
+  </div>
 
-  <section class="mt-2">
-    <h2>Recent Generations</h2>
-    <div id="history" class="history-list">Loading…</div>
-  </section>
+  <h2 class="section-heading">Recent Generations</h2>
+  <div id="history"><p style="color:var(--border);font-size:var(--text-sm)">Loading…</p></div>
 </Base>
 
 <script>
-  async function health(name: string, url: string): Promise<HTMLElement> {
-    const el = document.createElement("span");
-    el.className = "health-chip";
-    try {
-      const r = await fetch(url);
-      if (r.ok) {
-        el.classList.add("up");
-        el.textContent = `${name} ✓`;
-      } else {
-        el.classList.add("down");
-        el.textContent = `${name} ${r.status}`;
-      }
-    } catch {
-      el.classList.add("down");
-      el.textContent = `${name} ✗`;
-    }
-    return el;
-  }
-
   async function load() {
+    // Pipeline health
     const pipeline = document.getElementById("pipeline")!;
-    const stats    = document.getElementById("stats")!;
-    const history  = document.getElementById("history")!;
-
-    // Health
-    pipeline.innerHTML = "";
-    const checks = [
-      health("inference", "/api/../health"),  // relative to blog_generator proxy
-      health("blog-gen", "/api/health"),
+    const services = [
+      { label: "blog-gen",  url: "/api/health" },
+      { label: "inference", url: "/api/health" },  // blog-gen proxies health checks
     ];
-    // Check blog_generator health via api gateway, and deepsearch directly
-    try {
-      const bg = await fetch("/api/health");
-      if (bg.ok) pipeline.appendChild(await health("blog-gen", "/api/health"));
-    } catch { pipeline.appendChild(await health("blog-gen", "/api/health")); }
-    pipeline.appendChild(await health("inference", "/api/health"));
+    pipeline.innerHTML = "";
+    for (const srv of services) {
+      try {
+        const r = await fetch(srv.url);
+        const cls = r.ok ? "up" : "down";
+        pipeline.innerHTML += `<span class="pipeline-chip ${cls}">${srv.label} ${r.ok ? "✓" : r.status}</span>`;
+      } catch {
+        pipeline.innerHTML += `<span class="pipeline-chip down">${srv.label} ✗</span>`;
+      }
+    }
 
     // Stats
     try {
       const s = await fetch("/api/stats").then(r => r.json());
-      stats.innerHTML = `
-        <div class="stat"><strong>${s.total_generations}</strong> <span>generations</span></div>
-        <div class="stat"><strong>${s.total_tokens.toLocaleString()}</strong> <span>tokens</span></div>
-        <div class="stat"><strong>\$${s.total_cost_usd.toFixed(4)}</strong> <span>total cost</span></div>
-        <div class="stat"><strong>${Math.round(s.avg_duration_ms)}ms</strong> <span>avg duration</span></div>
+      document.getElementById("stats-grid")!.innerHTML = `
+        <div class="stat-card"><span class="stat-value">${s.total_generations}</span><span class="stat-label">generations</span></div>
+        <div class="stat-card"><span class="stat-value">${s.total_tokens.toLocaleString()}</span><span class="stat-label">tokens</span></div>
+        <div class="stat-card"><span class="stat-value">\$${s.total_cost_usd.toFixed(4)}</span><span class="stat-label">cost</span></div>
+        <div class="stat-card"><span class="stat-value">${Math.round(s.avg_duration_ms)}ms</span><span class="stat-label">avg duration</span></div>
       `;
     } catch {
-      stats.innerHTML = `<div class="error-block">blog_generator unreachable</div>`;
+      document.getElementById("stats-grid")!.innerHTML = `<p style="color:var(--border)">blog_generator unreachable</p>`;
     }
 
     // History
     try {
       const h = await fetch("/api/history?limit=20").then(r => r.json());
       if (!Array.isArray(h) || h.length === 0) {
-        history.innerHTML = `<p class="muted">No generations yet. <a href="/generate">Run one?</a></p>`;
+        document.getElementById("history")!.innerHTML = `<div class="empty-state"><p>No generations yet.</p><p style="margin-top:var(--space-3)"><a href="/generate">→ run the first one</a></p></div>`;
         return;
       }
-      history.innerHTML = h.map((g: any) => `
-        <div class="history-row">
-          <div class="history-date">${(g.created_at ?? "").slice(0, 10)}</div>
-          <div class="history-topic">${g.topic}</div>
-          <div class="history-meta">${g.model} · ${g.total_tokens ?? 0} tokens · \$${g.cost_usd ?? "—"} · ${g.duration_ms ?? 0}ms · ${g.status ?? "?"}</div>
-        </div>
+      document.getElementById("history")!.innerHTML = h.map((g: any) => `
+        <article class="post-item">
+          <time class="post-date">${(g.created_at ?? "").slice(0, 10)}</time>
+          <div class="post-link" style="font-size:var(--text-base)">${g.topic}</div>
+          <span style="font-size:var(--text-xs);color:var(--border)">${g.model} · ${g.total_tokens ?? 0} tokens · \$${g.cost_usd ?? "?"} · ${g.duration_ms ?? 0}ms · <span style="color:${g.status === "ok" ? "var(--signal-dim)" : "#ff6666"}">${g.status}</span></span>
+        </article>
       `).join("");
     } catch {
-      history.innerHTML = `<div class="error-block">Could not load history</div>`;
+      document.getElementById("history")!.innerHTML = `<p style="color:#ff6666;font-size:var(--text-sm)">Could not load history</p>`;
     }
   }
 
   load();
 </script>
-
-<style>
-  .pipeline-grid { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .health-chip {
-    padding: 0.3em 0.8em;
-    font-size: 0.75rem;
-    border: 1px solid var(--border);
-    color: var(--fg-muted);
-  }
-  .health-chip.up   { border-color: var(--accent); color: var(--accent); }
-  .health-chip.down { border-color: #ff4444; color: #ff4444; }
-
-  .stats-grid {
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-  .stat {
-    background: var(--bg-alt);
-    border: 1px solid var(--border);
-    padding: 1rem 1.25rem;
-    min-width: 120px;
-  }
-  .stat strong {
-    display: block;
-    font-size: 1.3rem;
-    color: var(--accent);
-    margin-bottom: 0.2rem;
-  }
-  .stat span {
-    font-size: 0.65rem;
-    color: var(--fg-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .history-list { }
-  .history-row {
-    border-bottom: 1px solid var(--border);
-    padding: 0.65rem 0;
-    font-size: 0.8rem;
-  }
-  .history-row:first-of-type { padding-top: 0; }
-  .history-date  { color: var(--fg-muted); font-size: 0.7rem; }
-  .history-topic { font-weight: 600; margin: 0.15rem 0; }
-  .history-meta  { color: var(--fg-muted); font-size: 0.7rem; }
-</style>

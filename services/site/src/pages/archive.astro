@@ -11,16 +11,17 @@ const allPosts = Object.entries(import.meta.glob("/src/content/posts/*.mdx", { e
 
 <Base title="Archive">
   <h1>Archive</h1>
-  <p class="muted">{allPosts.length} posts total</p>
-  <hr />
+  <p style="color:var(--border);font-size:var(--text-sm);margin-top:-1rem;margin-bottom:var(--space-6)">{allPosts.length} posts</p>
 
-  {allPosts.map(post => (
-    <article class="post-item">
-      <div class="date">{new Date(post.date).toISOString().slice(0, 10)}</div>
-      <a href={`/posts/${post.slug}`} class="title">{post.title}</a>
-      <span class="category-tag">{post.category}</span>
-      {post.excerpt && <p class="excerpt">{post.excerpt}</p>}
-      {(post.tags as string[]).map(t => <span class="tag">{t}</span>)}
-    </article>
-  ))}
+  <div class="post-feed">
+    {allPosts.map((post: any) => (
+      <article class="post-item">
+        <time class="post-date" datetime={new Date(post.date).toISOString()}>{new Date(post.date).toISOString().slice(0, 10)}</time>
+        <a href={`/posts/${post.slug}`} class="post-link">{post.title}</a>
+        <span class="chip chip-category">{post.category}</span>
+        {post.excerpt && <p class="post-excerpt">{post.excerpt}</p>}
+        {(post.tags as string[])?.map((t: string) => <span class="chip chip-tag">{t}</span>)}
+      </article>
+    ))}
+  </div>
 </Base>

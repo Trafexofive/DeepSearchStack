@@ -19,14 +19,11 @@ const pageTitle = title ? `${title} :: ${SITE.title}` : SITE.title;
 <body>
   <header class="site-header">
     <div class="container">
-      <a href="/" class="site-title">⊢ {SITE.title}</a>
+      <a href="/" class="site-title">{SITE.title}</a>
       <nav class="main-nav">
-        <a href="/news">news</a>
-        <a href="/guides">guides</a>
-        <a href="/benchmarks">benchmarks</a>
-        <a href="/research">research</a>
-        <a href="/generate">generate</a>
-        <a href="/archive">archive</a>
+        {["news", "guides", "benchmarks", "research", "generate", "archive"].map((slug) => (
+          <a href={`/${slug}`} aria-current={title?.toLowerCase() === slug || (slug === "guides" && title === "Guides") || null}>{slug}</a>
+        ))}
       </nav>
     </div>
   </header>
@@ -37,8 +34,8 @@ const pageTitle = title ? `${title} :: ${SITE.title}` : SITE.title;
 
   <footer class="site-footer">
     <div class="container">
-      <span>{SITE.tagline} <a href="/rss.xml">rss</a></span>
-      <span class="muted">FOSS • no tracking • no JS bloat</span>
+      <span>{SITE.tagline} <a href="/rss.xml">[rss]</a></span>
+      <span>FOSS · no tracking · no JS bloat</span>
     </div>
   </footer>
 </body>
