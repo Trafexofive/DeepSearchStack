@@ -1,0 +1,98 @@
+# SEO/GEO Content Loop — Multi-step Astro+MDX generation pipeline
+# Triggered by: POST /api/workflows/trigger
+# Payload: { "workflow": "seo_content_loop", "params": { "topic": "...", "keyword": "..." } }
+
+name: seo_content_loop
+version: "1.0"
+description: >
+  Full-cycle content generation pipeline. Researches a topic via web search,
+  generates an outline, writes MDX with GEO optimization, audits quality,
+  and publishes to the content vault.
+
+trigger:
+  type: api
+  endpoint: /api/workflows/trigger/seo_content_loop
+  params:
+    topic:
+      type: string
+      required: true
+      description: "Content topic / title"
+    keyword:
+      type: string
+      required: false
+      description: "Primary keyword for GEO optimization"
+    tone:
+      type: string
+      required: false
+      default: "professional"
+      enum: ["professional", "conversational", "technical", "tutorial"]
+
+steps:
+  - id: research
+    agent: scribe
+    task: research_topic
+    inputs:
+      topic: $params.topic
+      keyword: $params.keyword
+    tools:
+      - std/manifests/tools/web_search
+    output: research_notes
+    retry: 2
+
+  - id: outline
+    agent: scribe
+    task: generate_outline
+    inputs:
+      topic: $params.topic
+      research: $steps.research.output
+      tone: $params.tone
+    tools:
+      - scribe/tools/mdx_writer
+    output: outline
+    depends_on: [research]
+
+  - id: generate
+    agent: scribe
+    task: write_mdx
+    inputs:
+      outline: $steps.outline.output
+      topic: $params.topic
+      tone: $params.tone
+    tools:
+      - scribe/tools/mdx_writer
+    output: mdx_content
+    depends_on: [outline]
+
+  - id: audit
+    agent: scribe
+    task: audit_quality
+    inputs:
+      content: $steps.generate.output
+      keyword: $params.keyword
+    tools:
+      - scribe/tools/mdx_writer
+    output: audit_report
+    depends_on: [generate]
+
+  - id: publish
+    agent: scribe
+    task: publish_to_vault
+    inputs:
+      content: $steps.generate.output
+      audit: $steps.audit.output
+    relics:
+      - manifests/relics/content_vault
+    output: publish_result
+    depends_on: [audit]
+
+on_success:
+  action: notify
+  channel: event_bus
+  message: "Content published: $params.topic"
+
+on_failure:
+  action: notify
+  channel: event_bus
+  message: "Content pipeline failed: $params.topic"
+  retry_workflow: true
+  max_retries: 2

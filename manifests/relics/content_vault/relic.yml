@@ -1,0 +1,18 @@
+# Content Vault Relic — MDX + Asset Storage
+name: content_vault
+version: "1.0"
+description: "Decoupled storage for generated MDX content and associated assets"
+type: filesystem
+storage:
+  path: /data/content
+  format: mdx
+  structure:
+    posts/: "Published MDX files"
+    drafts/: "Work-in-progress content"
+    assets/: "Images, diagrams, and media"
+    metadata/: "JSON index files"
+operations:
+  - write
+  - read
+  - list
+  - delete

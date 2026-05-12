@@ -1,0 +1,98 @@
+# Substrate Core — Motherboard Docker Compose
+# Boots all runtime services and their dependencies.
+
+version: "3.8"
+
+services:
+  # ─── Core Services ──────────────────────────────────────────────────────────
+
+  api_gateway:
+    build: ../services/api_gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - API_GATEWAY_PORT=8000
+      - REDIS_URL=redis://event_bus:6379/0
+    depends_on:
+      event_bus:
+        condition: service_started
+    volumes:
+      - ../services/api_gateway/config:/app/config:ro
+      - ../services/api_gateway/volumes/data:/app/data
+    networks:
+      - substrate-net
+
+  workflow_engine:
+    build: ../services/workflow_engine
+    ports:
+      - "8001:8001"
+    environment:
+      - WORKFLOW_ENGINE_PORT=8001
+      - REDIS_URL=redis://event_bus:6379/0
+    depends_on:
+      - event_bus
+    volumes:
+      - ../manifests/workflows:/app/manifests/workflows:ro
+      - ../services/workflow_engine/config:/app/config:ro
+    networks:
+      - substrate-net
+
+  llm_gateway:
+    build: ../services/llm_gateway
+    ports:
+      - "8002:8002"
+    environment:
+      - LLM_GATEWAY_PORT=8002
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-llama3.2:latest}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    volumes:
+      - ../services/llm_gateway/config:/app/config:ro
+    networks:
+      - substrate-net
+
+  event_bus:
+    build: ../services/event_bus
+    ports:
+      - "8003:8003"
+    environment:
+      - EVENT_BUS_PORT=8003
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_started
+    volumes:
+      - ../services/event_bus/config:/app/config:ro
+    networks:
+      - substrate-net
+
+  # ─── Infrastructure ────────────────────────────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - substrate-net
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api_gateway
+    networks:
+      - substrate-net
+
+networks:
+  substrate-net:
+    driver: bridge
+
+volumes:
+  redis-data:

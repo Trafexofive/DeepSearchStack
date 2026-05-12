@@ -1,0 +1,14 @@
+version: "3.8"
+services:
+  workflow_engine:
+    build: .
+    ports:
+      - "8001:8001"
+    environment:
+      - WORKFLOW_ENGINE_PORT=8001
+    volumes:
+      - ./config:/app/config:ro
+      - ./volumes/data:/app/data
+      - ../../manifests/workflows:/app/manifests/workflows:ro
+    env_file:
+      - ../../.env

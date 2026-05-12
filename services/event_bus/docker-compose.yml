@@ -1,0 +1,21 @@
+version: "3.8"
+services:
+  event_bus:
+    build: .
+    ports:
+      - "8003:8003"
+    environment:
+      - EVENT_BUS_PORT=8003
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      - redis
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+volumes:
+  redis-data:

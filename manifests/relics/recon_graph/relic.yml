@@ -1,0 +1,22 @@
+# Recon Graph Relic — Competitor Entity Graph
+name: recon_graph
+version: "1.0"
+description: "Neo4j graph database for competitive intelligence entities and relationships"
+type: neo4j
+storage:
+  uri: ${NEO4J_URI:-bolt://localhost:7687}
+  user: ${NEO4J_USER:-neo4j}
+  password: ${NEO4J_PASSWORD:-substrate}
+entities:
+  competitor: "Competitor companies"
+  product: "Products and features"
+  page: "Scraped web pages"
+  technology: "Tech stack components"
+relationships:
+  - "competitor -> provides -> product"
+  - "product -> uses -> technology"
+  - "page -> mentions -> competitor"
+operations:
+  - query
+  - insert
+  - upsert

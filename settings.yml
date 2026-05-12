@@ -1,0 +1,43 @@
+# Substrate global settings
+version: "1.0"
+
+substrate:
+  name: "Omni Indie Hacker Control Plane"
+  environment: ${ENVIRONMENT:-development}
+
+services:
+  api_gateway:
+    port: 8000
+    cors_origins: ["*"]
+    rate_limit: 100/minute
+
+  workflow_engine:
+    max_retries: 3
+    retry_delay_secs: 5
+    max_concurrent_workflows: 10
+
+  llm_gateway:
+    default_provider: ${LLM_PROVIDER:-ollama}
+    default_model: ${LLM_MODEL:-llama3.2:latest}
+    providers:
+      ollama:
+        base_url: ${OLLAMA_BASE_URL:-http://localhost:11434}
+      groq:
+        api_key: ${GROQ_API_KEY:-}
+      openai:
+        api_key: ${OPENAI_API_KEY:-}
+
+  event_bus:
+    provider: redis
+    redis_url: ${REDIS_URL:-redis://localhost:6379/0}
+
+manifests:
+  root: ./manifests
+  agents: ./manifests/agents
+  relics: ./manifests/relics
+  workflows: ./manifests/workflows
+  monuments: ./manifests/monuments
+
+clients:
+  webui_port: 3000
+  tui_enabled: true

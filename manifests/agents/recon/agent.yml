@@ -1,0 +1,18 @@
+# Recon Agent — Competitor Scraping & Intelligence
+name: recon
+version: "1.0"
+description: >
+  Scrapes competitor websites, extracts structured entity data,
+  and populates the recon_graph (Neo4j) for competitive analysis.
+
+system_prompt: system-prompts/recon.md
+
+tools:
+  - playwright_scraper: tools/playwright_scraper/tool.yml
+
+llm:
+  provider: ${LLM_PROVIDER:-ollama}
+  model: ${LLM_MODEL:-llama3.2:latest}
+
+relics:
+  - recon_graph: manifests/relics/recon_graph/relic.yml

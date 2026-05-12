@@ -1,0 +1,14 @@
+# Sentinel Agent — Uptime Monitoring & DevOps
+name: sentinel
+version: "1.0"
+description: >
+  Monitors service uptime, collects latency metrics, triggers
+  incident response workflows, and maintains the metrics_store.
+
+system_prompt: system-prompts/sentinel.md
+
+tools:
+  - health_ping: tools/health_ping/tool.yml
+
+relics:
+  - metrics_store: manifests/relics/metrics_store/relic.yml
