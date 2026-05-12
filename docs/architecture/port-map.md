@@ -9,6 +9,10 @@
 | `event_bus` | 8003 | substrate-net | stub | Redis pub/sub + WebSocket |
 | `inference_gateway` | 8005 | substrate-net | **✅ live** | DeepSeek v4-flash, provider pattern |
 | `blog_generator` | 8006 | substrate-net | **✅ live** | AI blog gen, structured logging, SQLite tracker |
+| `deepsearch` | 8001 | deepsearch_net | POC | 5-stage pipeline: search→scrape→embed→retrieve→synthesize |
+| `search-gateway` | 8002 | deepsearch_net | POC | Multi-provider search aggregator (Whoogle, SearXNG, DDG, etc.) |
+| `crawler` | 8000 | deepsearch_net | POC | crawl4ai-based web scraper |
+| `vector-store` | 8004 | deepsearch_net | POC | ChromaDB + sentence-transformers for RAG |
 | `redis` | 6379 | substrate-net | infrastructure | Redis 7 Alpine |
 
 ## How to check

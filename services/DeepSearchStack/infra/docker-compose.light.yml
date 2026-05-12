@@ -1,0 +1,256 @@
+# ======================================================================================
+# DeepSearchStack - Docker Compose Configuration (Gemini-Only Version)
+# ======================================================================================
+
+volumes:
+  postgres_data:
+  yacy_data:
+  redis_data:
+  openwebui_data:
+
+networks:
+  deepsearch_net:
+    driver: bridge
+    name: deepsearch_net
+
+services:
+  # --- CORE INFRASTRUCTURE ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-searchdb}
+      - POSTGRES_USER=${POSTGRES_USER:-searchuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-searchpass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- AI SERVICES ---
+  llm-gateway:
+    build:
+      context: ../services/llm_gateway
+      dockerfile: Dockerfile
+    container_name: llm-gateway-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    env_file: ../.env
+    environment:
+      # Remove OLLAMA_BASE_URL since we're using only Gemini
+      - ENABLE_GEMINI=true
+      - ENABLE_GROQ=${ENABLE_GROQ:-false}
+      - ENABLE_OLLAMA=false  # Disable Ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    ports:
+      - "8080:8080"
+
+  # --- CORE LOGIC ---
+  search-gateway:
+    build:
+      context: ../services/search-gateway
+      dockerfile: Dockerfile
+    container_name: search-gateway-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: ../.env
+    environment:
+      - YACY_URL=http://yacy:8090
+      - WHOOGLE_URL=http://whoogle:5000
+      - SEARXNG_URL=http://searxng:8080
+    ports:
+      - "8002:8002"
+
+  deepsearch:
+    build:
+      context: ../services/deepsearch
+      dockerfile: Dockerfile
+    container_name: deepsearch-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      llm-gateway:
+        condition: service_healthy
+      search-gateway:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: ../.env
+    environment:
+      - SEARCH_GATEWAY_URL=http://search-gateway:8002
+      - LLM_GATEWAY_URL=http://llm-gateway:8080
+      - VECTOR_STORE_URL=http://vector-store:8004
+      - CRAWLER_URL=http://crawler:8000
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_URL=postgresql://searchuser:searchpass@postgres:5432/searchdb
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # --- USER INTERFACE & PROXY ---
+  reverse-proxy:
+    build:
+      context: ../services/reverse-proxy
+      dockerfile: Dockerfile
+    container_name: reverse-proxy-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    ports:
+      - "8090:80"
+    depends_on:
+      - deepsearch
+      - frontend
+
+  frontend:
+    build:
+      context: ../services/frontend
+      dockerfile: Dockerfile
+    container_name: frontend-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      deepsearch:
+        condition: service_healthy
+    environment:
+      - NEXT_PUBLIC_DEEPSEARCH_URL=http://localhost:8001
+    ports:
+      - "3002:3000"
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: openwebui-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    depends_on:
+      - llm-gateway
+    env_file: ../.env
+    environment:
+      - OPENAI_API_BASE_URL=http://llm-gateway:8080/v1
+      # Remove Ollama base URL since we're not using it
+      - WEBUI_NAME=DeepSearchStack WebUI
+      - WEBUI_URL=http://localhost:${OPENWEBUI_PORT:-3000}
+    ports:
+      - "${OPENWEBUI_PORT:-3000}:8080"
+    volumes:
+      - openwebui_data:/app/backend/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # --- SEARCH BACKENDS ---
+  yacy:
+    image: yacy/yacy_search_server:latest
+    container_name: yacy-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    volumes:
+      - yacy_data:/opt/yacy_search_server/DATA
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/status.json"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+  whoogle:
+    image: benbusby/whoogle-search:latest
+    container_name: whoogle-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    environment:
+      - WHOOGLE_CONFIG_GET_ONLY=1
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    volumes:
+      - ../services/searxng/settings.yml:/etc/searxng/settings.yml
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE]
+
+  # --- UTILITY & DATA SERVICES ---
+  vector-store:
+    build:
+      context: ../services/vector-store
+      dockerfile: Dockerfile
+    container_name: vector-store-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    ports:
+      - "8004:8004"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  crawler:
+    build:
+      context: ../services/crawler
+      dockerfile: Dockerfile
+    container_name: crawler-1
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    ports:
+      - "8003:8000"
+    environment:
+      - PORT=8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

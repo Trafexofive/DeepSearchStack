@@ -1,0 +1,117 @@
+# ==============================================================================
+# Git Ignore for DeepSearchStack
+#
+# This file prevents common temporary, sensitive, and machine-specific files
+# from being committed to the repository.
+# ==============================================================================
+
+# --- Sensitive Information ---
+# Never commit your environment file containing API keys and secrets.
+# The repository should only contain the template.
+.env
+
+# --- Local Data Volumes ---
+# These directories are created by docker-compose to persist data.
+# They should not be part of the git history as they can become very large
+# and contain user-specific information.
+postgres_data/
+yacy_data/
+ollama_data/
+redis_data/
+
+# --- Python ---
+# Ignore Python cache files, virtual environments, and compiled files.
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Ignore distribution / packaging
+.bundle/
+dist/
+build/
+develop-eggs/
+eggs/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Ignore Python-specific IDE files
+.idea/
+.vscode/
+
+# Ignore pytest cache and reports
+.pytest_cache/
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# --- Operating System Files ---
+# Ignore common OS-generated files.
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Docker ---
+# Ignore local Docker build cache and context files.
+.dockerignore
+docker-compose.override.yml
+
+# --- Log Files ---
+# Ignore any local log files that might be generated during development.
+*.log
+logs/
+*.log.*
+
+# --- Node.js (for potential future Web UI) ---
+node_modules/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# --- IDEs and Editors ---
+# General IDE files
+.idea/
+.project
+.classpath
+.cproject
+.settings/
+
+# VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains
+*.iws
+*.iml
+*.ipr
+
+# --- Build Artifacts ---
+# Ignore any local build artifacts from C++ or other compiled languages.
+build/
+*.o
+*.so
+*.a

@@ -21,6 +21,10 @@
 | [event-bus.md](services/event-bus.md) | 8003 | stub |
 | [inference-gateway.md](services/inference-gateway.md) | 8005 | ✅ working |
 | [blog-generator.md](services/blog-generator.md) | 8006 | ✅ working |
+| [deepsearch.md](services/deepsearch.md) | 8001 | POC |
+| [search-gateway.md](services/search-gateway.md) | 8002 | POC |
+| [crawler.md](services/crawler.md) | 8000 | POC |
+| [vector-store.md](services/vector-store.md) | 8004 | POC |
 
 ## Manifests
 | File | Purpose |

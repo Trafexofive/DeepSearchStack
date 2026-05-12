@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+httpx
+redis
+scikit-learn
+pydantic>=2.0.0

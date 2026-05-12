@@ -1,0 +1,96 @@
+# ======================================================================================
+#                        CHIMERA - UNIFIED STACK DEFINITION
+# ======================================================================================
+#  This single file orchestrates the entire full-stack application.
+#  Reforged by Gemini for Absolute Sovereignty.
+# ======================================================================================
+services:
+  traefik:
+    image: "traefik:v2.10"
+    container_name: "traefik"
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro"
+    networks:
+      - ${CHIMERA_NETWORK}
+
+  ollama-server:
+    build:
+      context: .
+      dockerfile: infra/ollama-base/dockerfile
+    container_name: ollama-server
+    ports:
+      - "${OLLAMA_PORT}:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
+    env_file:
+      - .env
+    volumes:
+      - ollama-data:/root/.ollama
+      - ollama-logs:/var/log/ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - ${CHIMERA_NETWORK}
+
+  api-gateway:
+    build: src/api-gateway
+    container_name: api-gateway
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api-gateway.rule=Host(`${TRAEFIK_API_DOMAIN}`)"
+      - "traefik.http.services.api-gateway.loadbalancer.server.port=8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ollama-data:/root/.ollama
+      - ollama-logs:/var/log/ollama
+    networks:
+      - ${CHIMERA_NETWORK}
+    restart: unless-stopped
+    depends_on:
+      - ollama-server
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/admin/instances"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  chimera-frontend:
+    build: src/chimera-frontend
+    container_name: chimera-frontend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.chimera-frontend.rule=Host(`${TRAEFIK_FRONTEND_DOMAIN}`)"
+      - "traefik.http.services.chimera-frontend.loadbalancer.server.port=3000"
+    networks:
+      - ${CHIMERA_NETWORK}
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+    env_file:
+      - .env
+
+volumes:
+  ollama-data:
+    driver: local
+  ollama-logs:
+    driver: local
+
+networks:
+  chimera-net:
+    name: ${CHIMERA_NETWORK}
+    driver: bridge

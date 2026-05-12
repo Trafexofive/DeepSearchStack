@@ -1,0 +1,263 @@
+# ============================================================================
+# DeepSearch Service Configuration
+# ============================================================================
+# This file controls the behavior of the DeepSearch service.
+# All settings can be overridden via environment variables.
+
+# --- Service Settings ---
+service:
+  name: "DeepSearch"
+  version: "1.0.0"
+  host: "0.0.0.0"
+  port: 8001
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# --- Search Configuration ---
+search:
+  # Maximum number of results to fetch from search providers
+  max_results: 100
+  
+  # Default number of results to return if not specified in request
+  default_results: 20
+  
+  # Timeout for search provider requests (seconds)
+  timeout: 30.0
+  
+  # Enable parallel search across all providers
+  parallel_search: true
+  
+  # Default search providers (can be overridden per request)
+  default_providers:
+    - "whoogle"
+    - "searxng"
+    - "duckduckgo"
+    - "wikipedia"
+  
+  # Provider-specific settings
+  providers:
+    whoogle:
+      enabled: true
+      weight: 1.0  # Result scoring weight
+      retry_attempts: 2
+    searxng:
+      enabled: true
+      weight: 1.2
+      retry_attempts: 2
+    duckduckgo:
+      enabled: true
+      weight: 0.9
+      retry_attempts: 1
+    wikipedia:
+      enabled: true
+      weight: 1.1
+      retry_attempts: 1
+    yacy:
+      enabled: false  # P2P search, slower
+      weight: 0.7
+      retry_attempts: 1
+
+# --- Scraping Configuration ---
+scraping:
+  # Enable full content scraping for search results
+  enabled: true
+  
+  # Maximum number of URLs to scrape per search
+  max_scrape_urls: 50
+  
+  # Scraping timeout per URL (seconds)
+  timeout: 15.0
+  
+  # Number of concurrent scraping tasks
+  concurrency: 10
+  
+  # Minimum content length to consider valid (characters)
+  min_content_length: 100
+  
+  # Maximum content length to process (characters)
+  max_content_length: 50000
+  
+  # Extract strategy: "llm", "json_css", "markdown"
+  extraction_strategy: "markdown"
+  
+  # Retry failed scrapes
+  retry_attempts: 1
+  
+  # User agent for scraping
+  user_agent: "Mozilla/5.0 (compatible; DeepSearchBot/1.0)"
+
+# --- Vector Store / RAG Configuration ---
+rag:
+  # Enable RAG pipeline (search → scrape → embed → retrieve → synthesize)
+  enabled: true
+  
+  # Number of top chunks to retrieve for synthesis
+  top_k: 10
+  
+  # Minimum similarity score for retrieved chunks (0.0 - 1.0)
+  min_similarity: 0.3
+  
+  # Embedding model (used by vector-store service)
+  embedding_model: "all-MiniLM-L6-v2"
+  
+  # Chunk size for document splitting (characters)
+  chunk_size: 1000
+  
+  # Chunk overlap (characters)
+  chunk_overlap: 200
+  
+  # Store scraped content in vector database
+  store_scraped_content: true
+  
+  # TTL for cached embeddings (seconds, 0 = no expiration)
+  embedding_cache_ttl: 86400  # 24 hours
+
+# --- LLM Synthesis Configuration ---
+synthesis:
+  # Default LLM provider: "ollama", "groq", "gemini"
+  default_provider: "ollama"
+  
+  # Fallback providers if default fails
+  fallback_providers:
+    - "groq"
+    - "gemini"
+  
+  # Maximum context tokens to send to LLM
+  max_context_tokens: 8000
+  
+  # Temperature for synthesis (0.0 - 2.0)
+  temperature: 0.3
+  
+  # System prompt template
+  system_prompt: |
+    You are a world-class research assistant. Your sole purpose is to answer the user's query accurately and comprehensively based on the provided search context.
+    
+    Guidelines:
+    - Synthesize information from multiple sources into a coherent, well-structured answer
+    - Cite sources using bracket notation [1], [2], etc. at the end of relevant sentences
+    - If sources conflict, present multiple perspectives
+    - If context is insufficient, state what information is missing
+    - Use clear headings and bullet points when appropriate
+    - Be concise but thorough
+  
+  # Enable streaming responses
+  streaming: true
+  
+  # Timeout for LLM generation (seconds)
+  timeout: 120.0
+
+# --- Caching Configuration ---
+cache:
+  # Enable caching for search results and synthesis
+  enabled: true
+  
+  # Cache backend: "redis", "memory"
+  backend: "redis"
+  
+  # Cache TTL for search results (seconds)
+  search_ttl: 3600  # 1 hour
+  
+  # Cache TTL for synthesis results (seconds)
+  synthesis_ttl: 7200  # 2 hours
+  
+  # Cache TTL for scraped content (seconds)
+  scrape_ttl: 86400  # 24 hours
+  
+  # Generate cache keys from query + params hash
+  use_query_hash: true
+
+# --- Session Management ---
+sessions:
+  # Enable session persistence for chat history
+  enabled: true
+  
+  # Session storage: "postgres", "redis", "memory"
+  storage: "postgres"
+  
+  # Session TTL (seconds, 0 = no expiration)
+  ttl: 2592000  # 30 days
+  
+  # Maximum messages per session
+  max_messages: 1000
+  
+  # Store full search results in session
+  store_search_results: true
+  
+  # Store scraped content in session
+  store_scraped_content: false
+
+# --- Rate Limiting ---
+rate_limiting:
+  # Enable rate limiting per IP/API key
+  enabled: false
+  
+  # Requests per minute
+  requests_per_minute: 60
+  
+  # Requests per hour
+  requests_per_hour: 1000
+  
+  # Burst allowance
+  burst: 10
+
+# --- Performance & Optimization ---
+performance:
+  # Enable request deduplication (same query from multiple users)
+  deduplicate_requests: true
+  
+  # Deduplication window (seconds)
+  deduplication_window: 5.0
+  
+  # Enable async background tasks for scraping/embedding
+  background_tasks: true
+  
+  # Worker pool size for CPU-bound operations
+  worker_pool_size: 4
+  
+  # Enable result pre-fetching for common queries
+  prefetch_enabled: false
+
+# --- Monitoring & Telemetry ---
+monitoring:
+  # Enable metrics collection
+  enabled: true
+  
+  # Metrics endpoint
+  endpoint: "/metrics"
+  
+  # Log slow queries (seconds)
+  slow_query_threshold: 10.0
+  
+  # Track search provider performance
+  track_provider_latency: true
+  
+  # Track LLM provider performance
+  track_llm_latency: true
+
+# --- Advanced Features ---
+advanced:
+  # Enable multi-hop reasoning (iterative searches)
+  multi_hop_enabled: false
+  
+  # Maximum hops for multi-hop search
+  max_hops: 3
+  
+  # Enable query expansion using LLM
+  query_expansion: false
+  
+  # Enable automatic fact-checking
+  fact_checking: false
+  
+  # Enable source credibility scoring
+  credibility_scoring: true
+  
+  # Enable content summarization before synthesis
+  pre_summarization: false
+
+# --- Service URLs (internal) ---
+services:
+  search_gateway: "http://search-gateway:8002"
+  llm_gateway: "http://llm-gateway:8080"
+  vector_store: "http://vector-store:8004"
+  crawler: "http://crawler:8000"
+  redis: "redis://redis:6379/0"
+  postgres: "postgresql://searchuser:searchpass@postgres:5432/searchdb"

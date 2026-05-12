@@ -1,0 +1,17 @@
+# traefik.yml
+
+# Entrypoints
+entryPoints:
+  web:
+    address: ":80"
+
+# API and Dashboard
+api:
+  dashboard: true
+  insecure: true
+
+# Docker Provider
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
