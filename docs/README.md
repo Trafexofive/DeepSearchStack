@@ -11,16 +11,24 @@
 | [port-map.md](architecture/port-map.md) | Service port registry |
 | [network-topology.md](architecture/network-topology.md) | Docker network design |
 | [provider-pattern.md](architecture/provider-pattern.md) | How LLM providers plug in |
+| [language-agnostic.md](architecture/language-agnostic.md) | Language-agnostic microservices + SDKs |
+
+## SDKs
+| Path | Language | Type |
+|---|---|---|
+| [sdk/python/substrate/](../../sdk/python/substrate/) | Python 3.12+ | Async (httpx) |
+| [sdk/cpp/substrate.hpp](../../sdk/cpp/substrate.hpp) | C++17 | Header-only (libcurl) |
 
 ## Services
 | File | Port | Status |
 |---|---|---|
-| [api-gateway.md](services/api-gateway.md) | 8000 | stub |
-| [workflow-engine.md](services/workflow-engine.md) | 8001 | stub |
+| [api-gateway.md](services/api-gateway.md) | 8000 | ✅ working |
+| [workflow-engine.md](services/workflow-engine.md) | 8001 | ✅ working |
 | [llm-gateway.md](services/llm-gateway.md) | 8002 | stub |
-| [event-bus.md](services/event-bus.md) | 8003 | stub |
+| [event-bus.md](services/event-bus.md) | 8003 | ✅ working |
 | [inference-gateway.md](services/inference-gateway.md) | 8005 | ✅ working |
 | [blog-generator.md](services/blog-generator.md) | 8006 | ✅ working |
+| [ingest.md](services/ingest.md) | 8008 | ✅ working |
 | [deepsearch.md](services/deepsearch.md) | 8001 | POC |
 | [search-gateway.md](services/search-gateway.md) | 8002 | POC |
 | [crawler.md](services/crawler.md) | 8000 | POC |
