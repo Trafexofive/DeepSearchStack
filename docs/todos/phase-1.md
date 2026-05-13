@@ -15,3 +15,4 @@
 - [x] Blog generator — AI blog gen, structured logging, SQLite token/cost tracker
 - [x] Documentation scaffold (docs/ tree, ADRs, architecture diagrams)
 - [x] Pi-agent extensions cleaned (20 files, 6,854 lines, no bloat)
+- [ ] **Write article: SubMQ model + sub-agent research architecture** — how sub-agents, message queues, and research pipelines compose in the Substrate control plane

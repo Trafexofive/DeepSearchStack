@@ -50,6 +50,7 @@ class EmbedRequest(BaseModel):
 class DeleteRequest(BaseModel):
     ids: Optional[List[str]] = None
     namespace: Optional[str] = None
+    delete_all: bool = False
 
 
 def _generate_id(text: str) -> str:
@@ -113,13 +114,19 @@ async def _do_query(query_text: str, n_results: int, namespace: Optional[str]):
 
 @app.delete("/documents")
 async def delete_documents(req: DeleteRequest):
-    if req.ids:
+    if req.delete_all:
+        count = collection.count()
+        if count > 0:
+            all_ids = collection.get()["ids"]
+            collection.delete(ids=all_ids)
+        return {"deleted": count, "action": "delete_all"}
+    elif req.ids:
         collection.delete(ids=req.ids)
         return {"deleted": len(req.ids)}
     elif req.namespace:
         collection.delete(where={"namespace": req.namespace})
         return {"deleted": "namespace", "namespace": req.namespace}
-    raise HTTPException(status_code=400, detail="ids or namespace required")
+    raise HTTPException(status_code=400, detail="ids, namespace, or delete_all required")
 
 
 @app.get("/health")

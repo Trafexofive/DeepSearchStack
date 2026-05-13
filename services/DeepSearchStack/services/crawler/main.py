@@ -288,6 +288,24 @@ async def _do_crawl(req: CrawlRequest, rid: str = "") -> CrawlResponse:
         }
         _cache_put(url, cache_data)
 
+        # Forward to knowledge warehouse
+        if FORWARD_TO_WAREHOUSE:
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=5.0) as wh_client:
+                    await wh_client.post(
+                        f"{WAREHOUSE_URL}/ingest",
+                        json={
+                            "url": url, "markdown": markdown, "content": text,
+                            "title": title, "author": author,
+                            "published": published, "language": language,
+                            "word_count": len(text.split()),
+                            "source_domain": domain,
+                        },
+                    )
+            except Exception:
+                pass  # warehouse is optional, don't fail the crawl
+
         log.info("crawl_ok [%s] url=%s title=%s len=%d %.0fms", rid, url[:120], title, len(markdown), elapsed)
         return resp
 

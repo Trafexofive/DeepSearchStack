@@ -24,6 +24,7 @@
 - [ ] **Implement JWT auth in api_gateway**
 - [ ] **Implement OpenAI provider in llm_gateway** (or merge into inference-gateway)
 - [ ] **Write a real workflow execution** — run seo_content_loop end-to-end with real blog gen
+- [ ] **Build AI-SEO / GEO audit + tooling microservice(s)** — multifaceted: LLM citation analysis, answer-engine visibility scoring, GEO content optimizer, competitive LLM-mention tracking. Research-backed: audit current landscape, then build services.
 
 ## Backlog
 

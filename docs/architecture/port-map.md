@@ -11,7 +11,8 @@
 | `blog_generator` | 8006 | substrate-net | **✅ live** | AI blog gen, structured logging, SQLite tracker |
 | `deepsearch` | 8001 | deepsearch_net + substrate-net | ✅ live | 5-stage research pipeline for blog gen |
 | `search-gateway` | 8002 | deepsearch_net | ✅ live | Multi-provider search aggregator |
-| `crawler` | 8000 | deepsearch_net | ✅ live | crawl4ai-based web scraper |
+| `crawler` | 8000 | deepsearch_net | ✅ live | crawl4ai web scraper + SQLite cache v2 |
+| `knowledge-warehouse` | 8009 | deepsearch_net | ✅ live | SQLite FTS5 content repository |
 | `vector-store` | 8004 | deepsearch_net | ✅ live | ChromaDB persistent RAG storage |
 | `redis` | 6379 | substrate-net | infrastructure | Redis 7 Alpine |
 

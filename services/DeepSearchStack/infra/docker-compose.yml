@@ -8,6 +8,7 @@ volumes:
   yacy_data:
   redis_data:
   vector_data:
+  warehouse_data:
 
 networks:
   deepsearch_net:
@@ -98,7 +99,7 @@ services:
     ports:
       - "8001:8001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -154,7 +155,7 @@ services:
     ports:
       - "8004:8004"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -172,9 +173,32 @@ services:
       - "8000:8000"
     environment:
       - PORT=8000
+      - KNOWLEDGE_WAREHOUSE_URL=http://knowledge-warehouse:8009
+      - FORWARD_TO_WAREHOUSE=true
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  knowledge-warehouse:
+    build:
+      context: ..
+      dockerfile: services/knowledge-warehouse/Dockerfile
+    container_name: dss-knowledge-warehouse
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    ports:
+      - "8009:8009"
+    environment:
+      - PORT=8009
+    volumes:
+      - warehouse_data:/app/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8009/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

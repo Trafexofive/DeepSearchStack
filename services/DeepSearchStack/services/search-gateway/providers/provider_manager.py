@@ -74,7 +74,7 @@ class SearchProviderManager:
             url = provider_config["url"]
 
             if provider == SearchProvider.WHOOGLE: url = f"{url}/search"; params = {"q": query, "format": "json"}
-            elif provider == SearchProvider.SEARXNG: url = f"{url}/search"; params = {"q": query, "format": "json"}
+            elif provider == SearchProvider.SEARXNG: url = f"{url}/search"; params = {"q": query, "format": "json", "language": "en"}
             elif provider == SearchProvider.YACY: url = f"{url}/yacysearch.json"; params = {"query": query, "maximumRecords": 20}
             elif provider == SearchProvider.WIKIPEDIA: params = {"action": "query", "list": "search", "srsearch": query, "format": "json"}
             elif provider == SearchProvider.DUCKDUCKGO: params = {"q": query, "format": "json", "no_html": 1}
@@ -111,13 +111,26 @@ class SearchProviderManager:
         if not isinstance(data, dict):
             return []
         results = []
+        seen_urls = set()
         topics = data.get("RelatedTopics", [])
         for topic in topics:
-            if "Topics" in topic: topics.extend(topic["Topics"])
-            if topic.get("FirstURL") and topic.get("Text"):
-                results.append(SearchResult(title=topic.get("Text").split(" - ")[0], url=topic.get("FirstURL"), description=topic.get("Text"), source="duckduckgo", confidence=w))
-        if data.get("AbstractURL") and data.get("AbstractText"):
-             results.append(SearchResult(title=data.get("Heading", "Abstract"), url=data.get("AbstractURL"), description=data.get("AbstractText"), source="duckduckgo", confidence=w*1.1))
+            if "Topics" in topic:
+                topics.extend(topic["Topics"])
+                continue
+            url = topic.get("FirstURL", "")
+            text = topic.get("Text", "")
+            # Filter out DDG category pages — they're not real content
+            if url and text and "duckduckgo.com/c/" not in url and url not in seen_urls:
+                seen_urls.add(url)
+                results.append(SearchResult(
+                    title=text.split(" - ")[0] if " - " in text else text[:80],
+                    url=url, description=text, source="duckduckgo", confidence=w))
+        if data.get("AbstractURL") and data.get("AbstractText") and "duckduckgo.com/c/" not in data.get("AbstractURL", ""):
+            results.append(SearchResult(
+                title=data.get("Heading", "Abstract"),
+                url=data["AbstractURL"],
+                description=data["AbstractText"],
+                source="duckduckgo", confidence=w*1.1))
         return results
     def _parse_stackexchange(self, data, w):
         results = []
