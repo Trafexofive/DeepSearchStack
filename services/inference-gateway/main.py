@@ -16,8 +16,7 @@ from typing import Optional
 from models.requests import ChatCompletionRequest
 from models.responses import ChatCompletionResponse, ModelCatalogResponse, ModelInfo
 from providers.deepseek_provider import DeepSeekProvider
-from providers.glm_provider import GLMProvider
-from providers.minimax_provider import MiniMaxProvider
+from providers.nvidia_nim_provider import NvidiaNimProvider
 
 logger = logging.getLogger("inference-gateway")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -36,9 +35,8 @@ def _init_providers() -> dict:
     registry = {}
 
     specs = [
-        ("deepseek", DeepSeekProvider, "DEEPSEEK_API_KEY"),
-        ("glm",      GLMProvider,      "GLM_API_KEY"),
-        ("minimax",  MiniMaxProvider,   "MINIMAX_API_KEY"),
+        ("deepseek",   DeepSeekProvider,  "DEEPSEEK_API_KEY"),
+        ("nvidia_nim", NvidiaNimProvider,  "NVIDIA_API_KEY"),
         # Add more providers here as they're implemented:
         # ("openrouter",  OpenRouterProvider,  "OPENROUTER_API_KEY"),
         # ("nvidia",      NvidiaProvider,      "NVIDIA_API_KEY"),
@@ -95,15 +93,16 @@ async def discover_models():
             ModelInfo(id="deepseek-chat", provider="deepseek", owned_by="deepseek-ai", context_length=65536),
             ModelInfo(id="deepseek-reasoner", provider="deepseek", owned_by="deepseek-ai", context_length=65536),
         ],
-        "glm": [
-            ModelInfo(id="glm-4-plus", provider="glm", owned_by="zhipu-ai", context_length=131072),
-            ModelInfo(id="glm-4-flash", provider="glm", owned_by="zhipu-ai", context_length=131072),
-            ModelInfo(id="glm-4-air", provider="glm", owned_by="zhipu-ai", context_length=131072),
-            ModelInfo(id="glm-4-long", provider="glm", owned_by="zhipu-ai", context_length=1048576),
-        ],
-        "minimax": [
-            ModelInfo(id="MiniMax-Text-01", provider="minimax", owned_by="minimax", context_length=4194304),
-            ModelInfo(id="abab6.5s-chat", provider="minimax", owned_by="minimax", context_length=262144),
+        "nvidia_nim": [
+            ModelInfo(id="zhipuai/glm-4-9b-chat", provider="nvidia_nim", owned_by="zhipu-ai", context_length=131072),
+            ModelInfo(id="minimax/minimax-m1", provider="nvidia_nim", owned_by="minimax", context_length=4194304),
+            ModelInfo(id="deepseek-ai/deepseek-r1", provider="nvidia_nim", owned_by="deepseek-ai", context_length=131072),
+            ModelInfo(id="meta/llama-4-maverick-17b", provider="nvidia_nim", owned_by="meta", context_length=131072),
+            ModelInfo(id="meta/llama-4-scout-17b", provider="nvidia_nim", owned_by="meta", context_length=10485760),
+            ModelInfo(id="qwen/qwen3-235b-a22b", provider="nvidia_nim", owned_by="alibaba", context_length=131072),
+            ModelInfo(id="mistralai/mistral-large-2", provider="nvidia_nim", owned_by="mistral-ai", context_length=131072),
+            ModelInfo(id="google/gemma-3-27b-it", provider="nvidia_nim", owned_by="google", context_length=131072),
+            ModelInfo(id="microsoft/phi-4-mini", provider="nvidia_nim", owned_by="microsoft", context_length=131072),
         ],
     }
 

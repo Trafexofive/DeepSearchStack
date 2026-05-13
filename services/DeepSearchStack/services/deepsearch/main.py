@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from models import (
     DeepSearchRequest, DeepSearchResponse, QuickSearchRequest,
+    RecursiveResearchRequest,
     SessionCreate, SessionListResponse, HealthCheck, ServiceMetrics,
     SessionMessage, StreamChunk
 )
@@ -170,6 +171,33 @@ async def quick_search(request: QuickSearchRequest):
         return final_data
     else:
         raise HTTPException(status_code=500, detail="Search failed")
+
+
+@app.post("/deepsearch/research")
+async def recursive_research(request: RecursiveResearchRequest):
+    """Recursive research — multi-iteration deep-dive (Local Deep Research pattern).
+
+    Iterates: search → scrape → analyze gaps → refine query → repeat.
+    Returns streaming SSE progress + final synthesis.
+    """
+    if request.stream:
+        async def stream_generator():
+            async for chunk in engine.recursive_research(request):
+                yield f"data: {chunk.json()}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(stream_generator(), media_type="text/event-stream")
+    else:
+        answer_parts = []
+        final_data = None
+        async for chunk in engine.recursive_research(request):
+            if chunk.type == "content":
+                answer_parts.append(chunk.data.get("content", ""))
+            elif chunk.type == "complete":
+                final_data = chunk.data
+        if final_data:
+            final_data["answer"] = "".join(answer_parts)
+            return final_data
+        raise HTTPException(status_code=500, detail="Research failed")
 
 
 # ============================================================================

@@ -12,8 +12,28 @@ logger = logging.getLogger("deepsearch.rag")
 _SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
 
 
-def split_into_chunks(text: str, chunk_size: int = 1000, overlap_sentences: int = 2) -> List[str]:
-    """Split text into sentence-aware overlapping chunks for embedding."""
+def split_into_chunks(text: str, chunk_size: int = 1000, overlap_sentences: int = 2, overlap_chars: int = 0) -> List[str]:
+    """Split text into sentence-aware overlapping chunks for embedding.
+
+    Args:
+        chunk_size: target chars per chunk
+        overlap_sentences: number of sentences to carry forward between chunks
+        overlap_chars: if > 0, use char-based overlap instead of sentence-based
+    """
+    if overlap_chars > 0:
+        # Character-based overlap: slide window by (chunk_size - overlap_chars)
+        step = max(1, chunk_size - overlap_chars)
+        chunks = []
+        pos = 0
+        while pos < len(text):
+            chunk = text[pos:pos + chunk_size]
+            if len(chunk) < 100 and chunks:
+                break  # trailing fragment, skip
+            chunks.append(chunk)
+            pos += step
+        return chunks or [text]
+
+    # Sentence-based overlap
     sentences = _SENTENCE_RE.split(text)
     if not sentences:
         return []
@@ -26,7 +46,6 @@ def split_into_chunks(text: str, chunk_size: int = 1000, overlap_sentences: int 
         sent_len = len(sentence)
         if current_length + sent_len > chunk_size and current_chunk:
             chunks.append(" ".join(current_chunk))
-            # Keep overlap_sentences sentences for context overlap
             current_chunk = current_chunk[-overlap_sentences:] if len(current_chunk) > overlap_sentences else []
             current_length = sum(len(s) for s in current_chunk)
         current_chunk.append(sentence)
@@ -44,11 +63,16 @@ async def embed(client, query: str, scraped_content: List[ScrapedContent], vecto
         return
 
     documents = []
+    chunk_size = config.rag_config.get("chunk_size", 1000)
+    chunk_overlap = config.rag_config.get("chunk_overlap", 200)
+
     for content in scraped_content:
+        if not content.content:
+            continue
         chunks = split_into_chunks(
             content.content,
-            chunk_size=config.rag_config.get("chunk_size", 1000),
-            overlap=config.rag_config.get("chunk_overlap", 200),
+            chunk_size=chunk_size,
+            overlap_chars=chunk_overlap,
         )
         for i, chunk in enumerate(chunks):
             documents.append({
