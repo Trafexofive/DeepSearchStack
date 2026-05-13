@@ -1,5 +1,5 @@
 # DeepSearchStack — Root Compose (convenience, delegates to infra/)
-# LLM routing via substrate inference-gateway (port 8005, on substrate-net)
+# LLM routing via substrate inference-gateway (port 8005, on infra_substrate-net)
 
 volumes:
   postgres_data:
@@ -10,7 +10,7 @@ networks:
   deepsearch_net:
     driver: bridge
     name: deepsearch_net
-  substrate-net:
+  infra_substrate-net:
     external: true
 
 services:
@@ -63,7 +63,7 @@ services:
       dockerfile: services/deepsearch/Dockerfile
     container_name: dss-deepsearch
     restart: unless-stopped
-    networks: [deepsearch_net, substrate-net]
+    networks: [deepsearch_net, infra_substrate-net]
     depends_on:
       search-gateway: {condition: service_started}
       postgres: {condition: service_healthy}

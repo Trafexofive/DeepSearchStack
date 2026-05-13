@@ -10,7 +10,7 @@ networks:
   deepsearch_net:
     driver: bridge
     name: deepsearch_net
-  substrate-net:
+  infra_substrate-net:
     external: true
 
 services:
@@ -49,7 +49,7 @@ services:
       dockerfile: services/deepsearch/Dockerfile
     container_name: dss-light-deepsearch
     restart: unless-stopped
-    networks: [deepsearch_net, substrate-net]
+    networks: [deepsearch_net, infra_substrate-net]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
