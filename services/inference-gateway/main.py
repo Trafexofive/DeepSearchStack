@@ -16,6 +16,8 @@ from typing import Optional
 from models.requests import ChatCompletionRequest
 from models.responses import ChatCompletionResponse, ModelCatalogResponse, ModelInfo
 from providers.deepseek_provider import DeepSeekProvider
+from providers.glm_provider import GLMProvider
+from providers.minimax_provider import MiniMaxProvider
 
 logger = logging.getLogger("inference-gateway")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -35,6 +37,8 @@ def _init_providers() -> dict:
 
     specs = [
         ("deepseek", DeepSeekProvider, "DEEPSEEK_API_KEY"),
+        ("glm",      GLMProvider,      "GLM_API_KEY"),
+        ("minimax",  MiniMaxProvider,   "MINIMAX_API_KEY"),
         # Add more providers here as they're implemented:
         # ("openrouter",  OpenRouterProvider,  "OPENROUTER_API_KEY"),
         # ("nvidia",      NvidiaProvider,      "NVIDIA_API_KEY"),
@@ -91,7 +95,16 @@ async def discover_models():
             ModelInfo(id="deepseek-chat", provider="deepseek", owned_by="deepseek-ai", context_length=65536),
             ModelInfo(id="deepseek-reasoner", provider="deepseek", owned_by="deepseek-ai", context_length=65536),
         ],
-        # Add static models for other providers here
+        "glm": [
+            ModelInfo(id="glm-4-plus", provider="glm", owned_by="zhipu-ai", context_length=131072),
+            ModelInfo(id="glm-4-flash", provider="glm", owned_by="zhipu-ai", context_length=131072),
+            ModelInfo(id="glm-4-air", provider="glm", owned_by="zhipu-ai", context_length=131072),
+            ModelInfo(id="glm-4-long", provider="glm", owned_by="zhipu-ai", context_length=1048576),
+        ],
+        "minimax": [
+            ModelInfo(id="MiniMax-Text-01", provider="minimax", owned_by="minimax", context_length=4194304),
+            ModelInfo(id="abab6.5s-chat", provider="minimax", owned_by="minimax", context_length=262144),
+        ],
     }
 
     for provider_name, models in static_models.items():

@@ -28,14 +28,14 @@ trace before producing the final answer. You can see this in the API responses
 as `reasoning_content`:
 
 ```json
-{
-  "choices": [{
-    "delta": {
+&#123;
+  "choices": [&#123;
+    "delta": &#123;
       "reasoning_content": "The user is asking about R1...",
       "content": "R1 is a reasoning model..."
-    }
-  }]
-}
+    &#125;
+  &#125;]
+&#125;
 ```
 
 The model can think for hundreds of tokens before answering, dramatically
@@ -75,5 +75,5 @@ Or via the DeepSeek API (which Substrate's inference-gateway supports):
 ```bash
 curl http://localhost:8005/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"What is FOSS?"}]}'
+  -d '&#123;"model":"deepseek-v4-flash","messages":[&#123;"role":"user","content":"What is FOSS?"&#125;]&#125;'
 ```
