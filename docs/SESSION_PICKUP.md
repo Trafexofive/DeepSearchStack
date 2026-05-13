@@ -1,84 +1,61 @@
-# Session Pickup — How to Resume Work
+# SESSION_PICKUP.md — Substrate State
 
-> **Last updated**: 2026-05-12 · **Session**: pi session building Substrate + cleaning pi-agent extensions
+> Last updated: 2026-05-13 · Session: deepsearch hardening
 
-## Quick Start (in a new pi session)
+## Running Services (DeepSearchStack)
+
+```
+dss-crawler             :8000  ✅ healthy — v2 with SQLite cache, auto-warehousing
+dss-deepsearch          :8001  ✅ healthy — 5-stage pipeline, boilerplate stripping
+dss-search-gateway      :8002  ✅ live    — multi-provider: SearXNG/Wikipedia/Whoogle/DDG
+dss-vector-store        :8004  ✅ healthy — ChromaDB, 195 docs, delete_all endpoint
+dss-knowledge-warehouse :8009  ✅ healthy — SQLite FTS5, auto-ingest from crawler
+dss-searxng             :8080  ✅ live    — 14 engines, fixed language=en param
+dss-whoogle             :5000  ✅ live    — unreliable (0 results on specific queries)
+dss-yacy                :8090  🔴 disabled — P2P search, config disabled
+dss-postgres            :5432  ✅ healthy — sessions
+dss-redis               :6379  ✅ healthy — circuit breaker + cache
+```
+
+Also running (infra compose):
+```
+inference_gateway       :8005  ✅ — DeepSeek v4-flash
+blog_generator          :8006  ✅ — AI blog gen
+```
+
+## What Changed This Session
+
+1. **Crawler v2 deployed** — replaced v1 (no cache) with v2 (SQLite cache, 24h TTL, rate limiting, /cache/stats, /cache/clear). Auto-forwards to warehouse.
+2. **SearXNG fixed** — was returning 400 on every call. Added `language=en` param to provider_manager. Now returning 72K results aggregating 14 engines.
+3. **Provider diversity** — ranker uses round-robin interleaving across sources. DDG parser filters category-page URLs.
+4. **Boilerplate stripping** — `scraper.py` strips nav chrome, sidebars, footers, cookie banners, "See also"/"References" sections from crawled markdown before embedding.
+5. **Knowledge warehouse** — new service at :8009. SQLite FTS5 with full-text search. Crawler auto-ingests on each crawl. Endpoints: POST /ingest, GET /search?q=, GET /content/{id}, GET /stats.
+6. **Healthchecks** — replaced curl-based probes with python-based (`urllib.request`) in crawler, vector-store, deepsearch. All now healthy.
+7. **Vector store** — added `delete_all` endpoint, wiped 7.8K polluted docs, repopulating.
+8. **TODOs added** — SubMQ/research article, AI-SEO/GEO microservice audit.
+
+## What's Next
+
+- [ ] Pipeline optimization — 20s per query, dominated by search + crawl + LLM. Parallelize stages, Redis query cache.
+- [ ] Whoogle fix or replace — unreliable provider (0 results on specific queries).
+- [ ] DeepSearch from POC to production — better error recovery, retry logic, monitoring.
+- [ ] AI-SEO/GEO microservice (phase-2 todo).
+- [ ] SubMQ + sub-agent research architecture article (phase-1 todo).
+- [ ] Dockerfile base audit — multiple services use python:3.11-slim, could share base image.
+- [ ] Vector store re-index — trigger more diverse queries to rebuild clean index (currently 195 docs).
+- [ ] YaCy — either fix healthcheck/config or remove from compose.
+
+## Quick Test
 
 ```bash
-cd ~/repos/substrate
+# DeepSearch
+curl -X POST localhost:8001/deepsearch/quick \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"Rust programming language features","max_results":3}'
 
-# 1. Ensure Docker is running
-docker info
+# Warehouse search
+curl 'localhost:8009/search?q=rust+ownership'
 
-# 2. Set the DeepSeek key (from host env or paste it)
-export DEEPSEEK_API_KEY=$(grep DEEPSEEK_API_KEY ~/.zshrc 2>/dev/null | cut -d= -f2 | tr -d '"' | tr -d "'")
-echo "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" >> .env
-
-# 3. Start working services
-make up core
-
-# If only inference + blog needed:
-docker compose -f infra/docker-compose.core.yml up -d inference_gateway blog_generator
-
-# 4. Verify
-curl http://localhost:8005/health  # inference-gateway
-curl http://localhost:8006/health  # blog-generator
+# Crawler cache
+curl localhost:8000/cache/stats
 ```
-
-## Key Context (read these first)
-
-| File | Why |
-|---|---|
-| [planning/AGENDA.md](planning/AGENDA.md) | The 4-phase roadmap |
-| [planning/BOOTSTRAP_SNAPSHOT.md](planning/BOOTSTRAP_SNAPSHOT.md) | Full inventory of what exists |
-| [architecture/overview.md](architecture/overview.md) | System design |
-| [todos/phase-2.md](todos/phase-2.md) | Current work items |
-
-## Current State Snapshot
-
-### Working (verified e2e)
-- **inference-gateway** (port 8005): DeepSeek v4-flash via `deepseek-chat` model, OpenAI-compatible API
-- **blog-generator** (port 8006): Generates blog posts via inference-gateway, structured JSON logging, SQLite token/cost tracker
-
-### Scaffolded (stubs, not wired)
-- **api-gateway** (port 8000): FastAPI entrypoint with route stubs
-- **workflow-engine** (port 8001): YAML DAG parser stub
-- **llm-gateway** (port 8002): Simple Ollama/Groq route stubs
-- **event-bus** (port 8003): Redis pub/sub with WebSocket fan-out (EventBus class exists)
-- All manifests: agents, relics, workflows, monuments have YAML files
-
-### Repo Layout
-```
-substrate/
-├── docs/                  # ← YOU ARE HERE. All docs, ADRs, todos
-├── services/              # 6 services, 2 working
-├── infra/                 # docker-compose.core.yml, nginx
-├── manifests/             # Declarative agent/relic/workflow YAML
-├── Makefile               # v2 Master Control Program
-├── settings.yml           # Global config
-└── .env.example           # Template (copy to .env)
-```
-
-### Docker State
-- Two images built: `inference-gateway-inference_gateway`, `blog_generator-blog_generator`
-- Network: `substrate-net` (bridge)
-- Running: inference_gateway on 8005, blog_generator on 8006
-- Stop all: `docker compose -f infra/docker-compose.core.yml down`
-
-### Pi-Agent (separate repo: `~/.pi/agent/`)
-- Extensions cleaned up: 20 files, 6,854 lines (was 42 files, 13k lines, 15MB)
-- Working: web-search (SearXNG :8888), relic-registry, retry-guard, ask_cards (fixed)
-- See `BOOTSTRAP_SNAPSHOT.md` §4 for details
-
-## Immediate Priorities (Phase 2 — Wiring)
-
-1. **Wire blog_generator → workflow_engine**: trigger blog generation from a workflow manifest
-2. **Wire inference-gateway into workflow_engine agent dispatch**: agents call LLM via inference-gateway
-3. **Build remaining Docker images**: api_gateway, workflow_engine, llm_gateway, event_bus
-4. **Connect event_bus**: emit events on blog generation, workflow completion
-5. **Add more providers to inference-gateway**: copy Groq/NVIDIA/Gemini providers from `~/repos/free-inference-stack/`
-
-## Files to `.gitignore`
-- `.env` (contains API keys)
-- `*.db` (SQLite runtime data)
-- `__pycache__/`
