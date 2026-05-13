@@ -1,61 +1,130 @@
 # SESSION_PICKUP.md — Substrate State
 
-> Last updated: 2026-05-13 · Session: deepsearch hardening
+> Last updated: 2026-05-13 · Session: Phase 2 wiring complete + SDKs
 
-## Running Services (DeepSearchStack)
+## Stack Topology
+
+Two decoupled stacks on separate networks, cross-connected via `infra_substrate-net` bridge.
 
 ```
-dss-crawler             :8000  ✅ healthy — v2 with SQLite cache, auto-warehousing
-dss-deepsearch          :8001  ✅ healthy — 5-stage pipeline, boilerplate stripping
-dss-search-gateway      :8002  ✅ live    — multi-provider: SearXNG/Wikipedia/Whoogle/DDG
-dss-vector-store        :8004  ✅ healthy — ChromaDB, 195 docs, delete_all endpoint
-dss-knowledge-warehouse :8009  ✅ healthy — SQLite FTS5, auto-ingest from crawler
-dss-searxng             :8080  ✅ live    — 14 engines, fixed language=en param
-dss-whoogle             :5000  ✅ live    — unreliable (0 results on specific queries)
-dss-yacy                :8090  🔴 disabled — P2P search, config disabled
-dss-postgres            :5432  ✅ healthy — sessions
-dss-redis               :6379  ✅ healthy — circuit breaker + cache
+┌─ CORE (substrate-core_substrate-net) ─────────────────────┐
+│  api_gateway :8000  ·  workflow_engine :8001               │
+│  llm_gateway :8002  ·  event_bus :8003                     │
+│  inference_gateway :8005  ·  blog_generator :8006           │
+│  redis :6379                                                │
+│  knowledge_bridge :8010  ·  geo_audit :8011                 │
+│  sub_mq :8012  ·  ingest :8008                              │
+│  nginx :80  ←── gateway (sole host-exposed port)            │
+└─────────────────────────────────────────────────────────────┘
+         │
+    infra_substrate-net (shared bridge)
+         │
+┌─ DSS (deepsearch_net) ────────────────────────────────────┐
+│  deepsearch :8001  ·  crawler :8000                        │
+│  search-gateway :8002  ·  vector-store :8004               │
+│  knowledge-warehouse :8009  ·  postgres :5432               │
+│  redis :6379  ·  searxng :8080                              │
+│  whoogle :5000  ·  yacy :8090 (unhealthy)                   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-Also running (infra compose):
+## Running Services
+
+### Core Stack (12/12 OPERATIONAL)
 ```
-inference_gateway       :8005  ✅ — DeepSeek v4-flash
-blog_generator          :8006  ✅ — AI blog gen
+api_gateway          :8000  ✅ — 9-service reverse proxy, aggregate health
+workflow_engine      :8001  ✅ — networkx DAG executor, 5-step pipeline
+llm_gateway          :8002  ✅ — Ollama/Groq router
+event_bus            :8003  ✅ — Redis pub/sub + WebSocket, 30+ events
+inference_gateway    :8005  ✅ — DeepSeek v4-flash, 2 models
+blog_generator       :8006  ✅ — AI blog gen, SQLite tracker, 17 gens
+ingest               :8008  ✅ — RSS/Atom feed polling → blog gen, 4 drafts
+redis                :6379  ✅ — Redis 7 Alpine
+nginx                :80    ✅ — Edge gateway (only exposed port)
+knowledge_bridge     :8010  ✅ — DSS research → blog gen bridge
+geo_audit            :8011  ✅ — AI-SEO/GEO content scorer
+sub_mq               :8012  ✅ — Sub-agent message queue (Redis)
+```
+
+### DSS Stack (8/8 RUNNING, yacy unhealthy)
+```
+deepsearch           :8001  ✅ — 5-stage research pipeline
+search-gateway       :8002  ✅ — Multi-provider search aggr.
+crawler              :8000  ✅ — crawl4ai + SQLite cache v2
+vector-store         :8004  ✅ — ChromaDB
+knowledge-warehouse  :8009  ✅ — SQLite FTS5 content store
+searxng              :8080  ✅ — 14 engines
+whoogle              :5000  ✅ — Google proxy (unreliable)
+postgres             :5432  ✅ — Internal DB
+redis                :6379  ✅ — Cache + circuit breaker
+yacy                 :8090  🔴 — P2P search (slow start, always unhealthy)
 ```
 
 ## What Changed This Session
 
-1. **Crawler v2 deployed** — replaced v1 (no cache) with v2 (SQLite cache, 24h TTL, rate limiting, /cache/stats, /cache/clear). Auto-forwards to warehouse.
-2. **SearXNG fixed** — was returning 400 on every call. Added `language=en` param to provider_manager. Now returning 72K results aggregating 14 engines.
-3. **Provider diversity** — ranker uses round-robin interleaving across sources. DDG parser filters category-page URLs.
-4. **Boilerplate stripping** — `scraper.py` strips nav chrome, sidebars, footers, cookie banners, "See also"/"References" sections from crawled markdown before embedding.
-5. **Knowledge warehouse** — new service at :8009. SQLite FTS5 with full-text search. Crawler auto-ingests on each crawl. Endpoints: POST /ingest, GET /search?q=, GET /content/{id}, GET /stats.
-6. **Healthchecks** — replaced curl-based probes with python-based (`urllib.request`) in crawler, vector-store, deepsearch. All now healthy.
-7. **Vector store** — added `delete_all` endpoint, wiped 7.8K polluted docs, repopulating.
-8. **TODOs added** — SubMQ/research article, AI-SEO/GEO microservice audit.
+### Phase 2 Wiring (3/4 complete)
+1. **api_gateway v0.2.0** — Full reverse proxy. 9 services routed through `/api/{service}/*` with per-service prefix mapping. Aggregate health probes all 9 services. 120s timeout.
+2. **Event publishing fixed** — blog_generator emits `post_generated`, workflow_engine emits `step.{started,completed,failed,skipped}` and `workflow.{started,completed,failed}`. Orphan `infra-*` DNS conflict resolved.
+3. **workflow_engine v0.2.0** — Real DAG execution via networkx (cycle detection, topological sort). Variable resolution (`$params.x`, `$steps.id.output`). Step dispatch table maps agent+task → HTTP endpoints. Full 5-step `seo_content_loop` runs e2e in 76s.
+4. **JWT auth** — Not done (skipped for Content Command Center). Placeholder routes exist.
 
-## What's Next
+### Ingest Service
+5. **ingest (:8008)** — RSS/Atom feed polling → dss-crawler content extraction → blog_generator researched post → MDX draft storage. 3 arXiv feeds configured. 4 papers auto-blogged. Fixed `.mdx` glob bug, structured logger kwargs support.
 
-- [ ] Pipeline optimization — 20s per query, dominated by search + crawl + LLM. Parallelize stages, Redis query cache.
-- [ ] Whoogle fix or replace — unreliable provider (0 results on specific queries).
-- [ ] DeepSearch from POC to production — better error recovery, retry logic, monitoring.
-- [ ] AI-SEO/GEO microservice (phase-2 todo).
-- [ ] SubMQ + sub-agent research architecture article (phase-1 todo).
-- [ ] Dockerfile base audit — multiple services use python:3.11-slim, could share base image.
-- [ ] Vector store re-index — trigger more diverse queries to rebuild clean index (currently 195 docs).
-- [ ] YaCy — either fix healthcheck/config or remove from compose.
+### Stubs Filled (8 files → working)
+10. System prompts for recon, broker, sentinel agents
+11. Monument manifests for content_engine, devops_monitor, financial_hub
+12. Workflow manifests for incident_response, weekly_recon_sweep
+13. Scribe tool script (writer.py) — MDX generation, audit, publish
+
+### AI Slop Index
+14. Slop inventory artifact created — 30+ empty/stub files catalogued. 8 filled this session. 13 doc files + 2 phase todos remain empty.
+
+### Fixes Applied
+15. **HIGH**: knowledge-bridge research context was silently dropped. Added `context` field to blog_generator's GenerateRequest, threaded through to LLM prompt.
+16. MEDIUM: Ingest compose stale container name fixed.
+17. MEDIUM: Warehouse error handling wrapped in try/except.
+18. MEDIUM: knowledge_bridge + geo_audit added to substrate-net for service-name DNS.
+19. MEDIUM: nginx proxy headers fixed.
+
+## What's Next (by priority)
+
+### Content Command Center (post-wiring)
+- [ ] subctl CLI — Go/Rust binary that talks to api_gateway
+- [ ] TUI dashboard (Textual) — real-time control plane
+- [ ] Web dashboard — lightweight status/post browser
+- [ ] CI/CD blog pipeline — git-based MDX → geo-audit → auto-publish
+
+### Phase 2 — Remaining
+- [ ] JWT auth in api_gateway (placeholder routes exist)
+- [ ] Agent runner — reads agent.yml manifests, dispatches tools
+- [ ] Relic provisioner — spins up DBs from relic.yml manifests
+
+### Hardening
+- [ ] Port more providers to inference-gateway (Groq, NVIDIA, Gemini)
+- [ ] Proxy/VPN stack for DSS crawler privacy
+- [ ] Reddit/HN forum monitoring for content ideation
 
 ## Quick Test
 
 ```bash
-# DeepSearch
-curl -X POST localhost:8001/deepsearch/quick \
+# make all (boot everything)
+make all
+make health core
+make health dss
+
+# knowledge-bridge: research
+curl -X POST localhost:80/bridge/research \
   -H 'Content-Type: application/json' \
-  -d '{"query":"Rust programming language features","max_results":3}'
+  -d '{"topic":"Rust async runtimes","max_sources":2}'
 
-# Warehouse search
-curl 'localhost:8009/search?q=rust+ownership'
+# geo-audit: score content
+curl -X POST localhost:80/audit/content \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"# My Article\n\nContent here...","keyword":"keyword"}'
 
-# Crawler cache
-curl localhost:8000/cache/stats
+# sub-mq: publish and consume
+curl -X POST localhost:80/queue/publish \
+  -H 'Content-Type: application/json' \
+  -d '{"channel":"research","payload":{"query":"test"}}'
 ```
