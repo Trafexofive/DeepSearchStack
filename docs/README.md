@@ -3,6 +3,13 @@
 ## Session Pickup
 → **[SESSION_PICKUP.md](SESSION_PICKUP.md)** — Resume work in a new pi session. Start here.
 
+## Clients
+| Path | Language | Type |
+|---|---|---|
+| [subctl](../../clients/subctl/) | Go (stdlib only) | CLI binary (6MB) |
+| [sdk/python/substrate/](../../sdk/python/substrate/) | Python 3.12+ | Async SDK |
+| [sdk/cpp/substrate.hpp](../../sdk/cpp/substrate.hpp) | C++17 | Header-only |
+
 ## Architecture
 | File | Purpose |
 |---|---|
@@ -12,12 +19,6 @@
 | [network-topology.md](architecture/network-topology.md) | Docker network design |
 | [provider-pattern.md](architecture/provider-pattern.md) | How LLM providers plug in |
 | [language-agnostic.md](architecture/language-agnostic.md) | Language-agnostic microservices + SDKs |
-
-## SDKs
-| Path | Language | Type |
-|---|---|---|
-| [sdk/python/substrate/](../../sdk/python/substrate/) | Python 3.12+ | Async (httpx) |
-| [sdk/cpp/substrate.hpp](../../sdk/cpp/substrate.hpp) | C++17 | Header-only (libcurl) |
 
 ## Services
 | File | Port | Status |
