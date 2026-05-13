@@ -34,8 +34,8 @@ CONFIG_PATH = os.environ.get("INGEST_CONFIG", "/app/config/feeds.yml")
 OUTPUT_DIR = Path(os.environ.get("INGEST_OUTPUT_DIR", "/app/output"))
 STATE_DIR = Path(os.environ.get("INGEST_STATE_DIR", "/app/volumes/data"))
 
-CRAWLER_URL = os.environ.get("CRAWLER_URL", "http://crawler:8004")
-BLOG_GENERATOR_URL = os.environ.get("BLOG_GENERATOR_URL", "http://infra-blog_generator-1:8006")
+CRAWLER_URL = os.environ.get("CRAWLER_URL", "http://dss-crawler:8000")
+BLOG_GENERATOR_URL = os.environ.get("BLOG_GENERATOR_URL", "http://blog_generator:8006")
 
 log = get_logger(__name__)
 
@@ -168,7 +168,7 @@ async def startup():
 
     # Load seen GUIDs from output dir
     if OUTPUT_DIR.exists():
-        for f in OUTPUT_DIR.glob("*.md"):
+        for f in OUTPUT_DIR.glob("*.md*"):
             _seen_guids.add(f.stem)
 
     # Start background scheduler
@@ -213,7 +213,7 @@ async def list_drafts():
     if not OUTPUT_DIR.exists():
         return {"drafts": []}
     drafts = []
-    for f in sorted(OUTPUT_DIR.glob("*.md"), key=lambda x: x.stat().st_mtime, reverse=True):
+    for f in sorted(OUTPUT_DIR.glob("*.md*"), key=lambda x: x.stat().st_mtime, reverse=True):
         drafts.append({
             "filename": f.name,
             "size": f.stat().st_size,

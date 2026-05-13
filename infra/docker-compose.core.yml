@@ -6,8 +6,6 @@ services:
 
   api_gateway:
     build: ../services/api_gateway
-    ports:
-      - "8000:8000"
     environment:
       - API_GATEWAY_PORT=8000
       - REDIS_URL=redis://event_bus:6379/0
@@ -19,11 +17,10 @@ services:
       - ../services/api_gateway/volumes/data:/app/data
     networks:
       - substrate-net
+      - bridge-net
 
   workflow_engine:
     build: ../services/workflow_engine
-    ports:
-      - "8001:8001"
     environment:
       - WORKFLOW_ENGINE_PORT=8001
       - REDIS_URL=redis://event_bus:6379/0
@@ -37,8 +34,6 @@ services:
 
   llm_gateway:
     build: ../services/llm_gateway
-    ports:
-      - "8002:8002"
     environment:
       - LLM_GATEWAY_PORT=8002
       - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
@@ -53,8 +48,6 @@ services:
 
   inference_gateway:
     build: ../services/inference-gateway
-    ports:
-      - "8005:8005"
     environment:
       - INFERENCE_GATEWAY_PORT=8005
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
@@ -63,33 +56,10 @@ services:
       - ../services/inference-gateway/config:/app/config:ro
     networks:
       - substrate-net
-
-  deepsearch:
-    build:
-      context: ../services/DeepSearchStack
-      dockerfile: services/deepsearch/Dockerfile
-    ports:
-      - "8007:8001"
-    environment:
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - INFERENCE_GATEWAY_URL=http://inference_gateway:8005
-      - SEARCH_GATEWAY_URL=http://search_gateway:8002
-      - VECTOR_STORE_URL=http://vector_store:8004
-      - CRAWLER_URL=http://crawler:8000
-      - REDIS_URL=redis://redis:6379/0
-      - POSTGRES_URL=postgresql://${POSTGRES_USER:-deepsearch}:${POSTGRES_PASSWORD:-deepsearch}@${POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-deepsearch}
-    depends_on:
-      - inference_gateway
-    networks:
-      substrate-net:
-      deepsearch_net:
-        aliases:
-          - deepsearch
+      - bridge-net
 
   blog_generator:
     build: ../services/blog_generator
-    ports:
-      - "8006:8006"
     environment:
       - BLOG_GENERATOR_PORT=8006
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -100,11 +70,10 @@ services:
       - ../services/blog_generator/volumes/data:/app/data
     networks:
       - substrate-net
+      - bridge-net
 
   event_bus:
     build: ../services/event_bus
-    ports:
-      - "8003:8003"
     environment:
       - EVENT_BUS_PORT=8003
       - REDIS_URL=redis://redis:6379/0
@@ -116,12 +85,56 @@ services:
     networks:
       - substrate-net
 
+  knowledge_bridge:
+    build: ../services/knowledge-bridge
+    environment:
+      - BRIDGE_PORT=8010
+      - DEEPSEARCH_URL=http://dss-deepsearch:8001
+      - WAREHOUSE_URL=http://dss-knowledge-warehouse:8009
+      - CRAWLER_URL=http://dss-crawler:8000
+      - BLOG_GENERATOR_URL=http://blog_generator:8006
+    networks:
+      - substrate-net
+      - bridge-net
+
+  geo_audit:
+    build: ../services/geo-audit
+    environment:
+      - GEO_AUDIT_PORT=8011
+      - CRAWLER_URL=http://dss-crawler:8000
+    networks:
+      - substrate-net
+      - bridge-net
+
+  sub_mq:
+    build: ../services/sub-mq
+    environment:
+      - SUB_MQ_PORT=8012
+      - REDIS_URL=redis://redis:6379/0
+    networks:
+      - substrate-net
+      - bridge-net
+
+  ingest:
+    build: ../services/ingest
+    environment:
+      - INGEST_PORT=8008
+      - INGEST_CONFIG=/app/config/feeds.yml
+      - INGEST_OUTPUT_DIR=/app/output
+      - CRAWLER_URL=http://dss-crawler:8000
+      - BLOG_GENERATOR_URL=http://blog_generator:8006
+    volumes:
+      - ../services/ingest/config:/app/config:ro
+      - ../services/ingest/output:/app/output
+      - ../services/ingest/volumes/data:/app/volumes/data
+    networks:
+      - substrate-net
+      - bridge-net
+
   # ─── Infrastructure ────────────────────────────────────────────────────────
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
     networks:
@@ -141,8 +154,9 @@ services:
 networks:
   substrate-net:
     driver: bridge
-  deepsearch_net:
+  bridge-net:
     external: true
+    name: infra_substrate-net
 
 volumes:
   redis-data:

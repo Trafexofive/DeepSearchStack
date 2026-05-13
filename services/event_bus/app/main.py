@@ -94,7 +94,7 @@ class EventBus:
                 pass
 
 
-bus = EventBus()
+bus = EventBus(redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
 
 app = FastAPI(title="Substrate Event Bus", version="0.1.0")
 

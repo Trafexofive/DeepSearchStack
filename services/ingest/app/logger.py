@@ -15,9 +15,25 @@ class JSONFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+        # Include 'extra' fields passed via extra={...} kwarg
+        if hasattr(record, "extra_fields") and record.extra_fields:
+            log_entry.update(record.extra_fields)
         if record.exc_info and record.exc_info[1]:
             log_entry["error"] = str(record.exc_info[1])
         return json.dumps(log_entry)
+
+
+class StructuredAdapter(logging.LoggerAdapter):
+    """Adapter that converts kwargs to extra_fields for JSON logging."""
+    def process(self, msg, kwargs):
+        extra = kwargs.get("extra", {})
+        # Merge all non-standard kwargs into extra_fields
+        std_keys = {"exc_info", "extra", "stack_info", "stacklevel"}
+        for key in list(kwargs.keys()):
+            if key not in std_keys:
+                extra[key] = kwargs.pop(key)
+        kwargs["extra"] = {"extra_fields": extra}
+        return msg, kwargs
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -28,4 +44,4 @@ def get_logger(name: str) -> logging.Logger:
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         logger.propagate = False
-    return logger
+    return StructuredAdapter(logger, {})  # type: ignore[return-value]
