@@ -212,10 +212,61 @@ def _classify_domain(source: str) -> str:
     return DOMAIN_MAP.get(source, "unknown")
 
 
+# ── Boilerplate stripping (ported from deepsearch/core/scraper.py) ─────────
+
+import re as _re
+
+_BOILERPLATE_PATTERNS = [
+    _re.compile(r, _re.IGNORECASE) for r in [
+        r'^\[Jump to content\]', r'^\[Skip to (content|main|navigation)\]',
+        r'^Main menu$', r'^move to sidebar', r'^(Navigation|Contents|Menu)\s*$',
+        r'^\[.*?(Privacy|Terms|Cookie|Legal|Accessibility)\]',
+        r'^(Cookie|Privacy|Terms|Legal|Accessibility)\b',
+        r'^(Theme|Language|Version)\s+(Auto|Light|Dark)',
+        r'^(Previous|Next) topic', r'^Keyboard shortcuts$',
+        r'^Press .(←|→|S|\?|Esc). to', r'^\[.*?\]\(https?://.*?(privacy|terms|cookie)\)',
+    ]
+]
+_BOILERPLATE_SECTIONS = [
+    'see also', 'references', 'external links', 'further reading',
+    'notes', 'footnotes', 'citations', 'bibliography', 'navigation menu',
+]
+
+def _strip_boilerplate(markdown: str) -> str:
+    """Strip nav chrome, sidebars, footers from crawled markdown."""
+    if not markdown:
+        return markdown
+    lines = markdown.split('\n')
+    cleaned = []
+    skip_section = False
+    skip_level = 0
+    for line in lines:
+        stripped = line.strip()
+        heading = _re.match(r'^(#{1,6})\s+', stripped)
+        if heading:
+            level = len(heading.group(1))
+            text = stripped[heading.end():].strip().lower()
+            if skip_section and level <= skip_level:
+                skip_section = False
+            if text in _BOILERPLATE_SECTIONS:
+                skip_section = True
+                skip_level = level
+                continue
+        if skip_section:
+            continue
+        if stripped and any(p.search(stripped) for p in _BOILERPLATE_PATTERNS):
+            continue
+        cleaned.append(line)
+    result = '\n'.join(cleaned).strip()
+    result = _re.sub(r'\n{3,}', '\n\n', result)
+    return result if result else markdown
+
+
+# ── Scraping & RAG helpers ─────────────────────────────────
+
 async def _scrape_sources(sources: List[SourceResult]) -> list:
     """Scrape full content from source URLs via crawler service."""
-    scraped = []
-    sem = asyncio.Semaphore(5)  # 5 concurrent
+    sem = asyncio.Semaphore(5)
     
     async def scrape_one(s: SourceResult):
         async with sem:
@@ -228,8 +279,10 @@ async def _scrape_sources(sources: List[SourceResult]) -> list:
                     resp.raise_for_status()
                     data = resp.json()
                     if data.get("success"):
-                        return {"url": s.url, "title": s.title, "markdown": data.get("markdown", ""),
-                                "word_count": data.get("word_count", 0)}
+                        md = data.get("markdown", "")
+                        cleaned_md = _strip_boilerplate(md)
+                        return {"url": s.url, "title": s.title, "markdown": cleaned_md,
+                                "word_count": len(cleaned_md.split())}
             except Exception as e:
                 log.warning("scrape_failed url=%s: %s", s.url, str(e))
             return None

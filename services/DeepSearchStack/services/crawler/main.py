@@ -203,7 +203,7 @@ async def _do_crawl(req: CrawlRequest, rid: str = "") -> CrawlResponse:
     # Check cache
     if not req.bypass_cache:
         cached = _cache_get(url, ttl=cache_ttl)
-        if cached:
+        if cached and cached.get("markdown") and int(cached.get("word_count", 0)) > 0:
             log.info("cache_hit [%s] url=%s", rid, url[:120])
             return CrawlResponse(
                 url=url,
@@ -278,15 +278,16 @@ async def _do_crawl(req: CrawlRequest, rid: str = "") -> CrawlResponse:
             crawled_at=time.time(), cache_hit=False,
         )
 
-        # Store in cache
-        cache_data = {
-            "url": url, "content": text, "markdown": markdown,
-            "title": title, "author": author, "published": published,
-            "language": language, "word_count": len(text.split()),
-            "success": True, "source_domain": domain,
-            "crawled_at": time.time(), "headers": {},
-        }
-        _cache_put(url, cache_data)
+        # Store in cache (only if we got actual content)
+        if len(text) > 50:  # don't cache near-empty pages
+            cache_data = {
+                "url": url, "content": text, "markdown": markdown,
+                "title": title, "author": author, "published": published,
+                "language": language, "word_count": len(text.split()),
+                "success": True, "source_domain": domain,
+                "crawled_at": time.time(), "headers": {},
+            }
+            _cache_put(url, cache_data)
 
         # Forward to knowledge warehouse
         if FORWARD_TO_WAREHOUSE:
