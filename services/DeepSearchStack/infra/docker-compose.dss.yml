@@ -248,6 +248,8 @@ services:
       - INFERENCE_GATEWAY_URL=http://inference_gateway:8005
       - SEARCH_GATEWAY_URL=http://search-gateway:8002
       - WAREHOUSE_URL=http://knowledge-warehouse:8009
+      - CRAWLER_URL=http://crawler:8000
+      - VECTOR_STORE_URL=http://vector-store:8004
       - REDIS_URL=redis://redis:6379/0
     ports:
       - "8014:8014"

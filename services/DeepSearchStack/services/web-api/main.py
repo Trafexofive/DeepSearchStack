@@ -76,6 +76,8 @@ SEARCH_AGENT_URL = os.environ.get("SEARCH_AGENT_URL", "http://search-agent:8013"
 INFERENCE_GATEWAY_URL = os.environ.get("INFERENCE_GATEWAY_URL", "http://inference_gateway:8005")
 SEARCH_GATEWAY_URL = os.environ.get("SEARCH_GATEWAY_URL", "http://search-gateway:8002")
 WAREHOUSE_URL = os.environ.get("WAREHOUSE_URL", "http://knowledge-warehouse:8009")
+CRAWLER_URL = os.environ.get("CRAWLER_URL", "http://crawler:8000")
+VECTOR_STORE_URL = os.environ.get("VECTOR_STORE_URL", "http://vector-store:8004")
 
 # ─── Domain Classification ─────────────────────────────────
 DOMAIN_MAP = {
@@ -110,6 +112,12 @@ class AggregateRequest(BaseModel):
     max_results: int = Field(default=10, ge=1, le=50)
     include_warehouse: bool = Field(default=True)
     reconcile: bool = Field(default=True, description="LLM-based cross-domain fact reconciliation")
+    # DeepSearch pipeline extensions (unified API)
+    enable_scraping: bool = Field(default=False, description="Scrape top result pages for full content")
+    max_scrape_urls: int = Field(default=5, ge=1, le=20)
+    enable_rag: bool = Field(default=False, description="Embed → retrieve relevant chunks via vector-store")
+    rag_top_k: int = Field(default=10, ge=1, le=50)
+    enable_synthesis: bool = Field(default=True, description="LLM synthesis of search context")
 
 class ConsensusFact(BaseModel):
     claim: str
@@ -125,6 +133,10 @@ class AggregateResponse(BaseModel):
     consensus: Optional[List[ConsensusFact]] = None
     synthesis: Optional[str] = None
     execution_time_ms: int
+    # Unified DeepSearch fields
+    scraped_urls: int = 0
+    rag_chunks: int = 0
+    answer: Optional[str] = None  # synthesized answer (alias for synthesis)
 
 class ClientSearchRequest(BaseModel):
     query: str
@@ -200,6 +212,71 @@ def _classify_domain(source: str) -> str:
     return DOMAIN_MAP.get(source, "unknown")
 
 
+async def _scrape_sources(sources: List[SourceResult]) -> list:
+    """Scrape full content from source URLs via crawler service."""
+    scraped = []
+    sem = asyncio.Semaphore(5)  # 5 concurrent
+    
+    async def scrape_one(s: SourceResult):
+        async with sem:
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    resp = await client.post(
+                        f"{CRAWLER_URL}/crawl",
+                        json={"url": s.url, "extraction_strategy": "markdown", "timeout": 15},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    if data.get("success"):
+                        return {"url": s.url, "title": s.title, "markdown": data.get("markdown", ""),
+                                "word_count": data.get("word_count", 0)}
+            except Exception as e:
+                log.warning("scrape_failed url=%s: %s", s.url, str(e))
+            return None
+    
+    results = await asyncio.gather(*[scrape_one(s) for s in sources])
+    return [r for r in results if r and r.get("markdown")]
+
+
+async def _rag_pipeline(query: str, scraped: list, top_k: int) -> list:
+    """Embed scraped content → semantic search via vector-store."""
+    try:
+        # Embed documents
+        docs = [{"text": s["markdown"][:5000], "metadata": {"url": s["url"], "title": s["title"]}}
+                for s in scraped if s.get("markdown")]
+        if not docs:
+            return []
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            await client.post(f"{VECTOR_STORE_URL}/embed", json={"documents": docs})
+            resp = await client.post(
+                f"{VECTOR_STORE_URL}/query",
+                json={"query_text": query, "n_results": top_k},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            # Return documents with distances
+            chunks = []
+            ids_list = data.get("ids", [[]])[0]
+            docs_list = data.get("documents", [[]])[0]
+            metas_list = data.get("metadatas", [[]])[0]
+            distances = data.get("distances", [[]])[0]
+            for i in range(len(ids_list)):
+                chunks.append({
+                    "id": ids_list[i] if i < len(ids_list) else "",
+                    "content": docs_list[i] if i < len(docs_list) else "",
+                    "metadata": metas_list[i] if i < len(metas_list) else {},
+                    "distance": distances[i] if i < len(distances) else 1.0,
+                })
+            return chunks
+    except Exception as e:
+        log.error("rag_failed: %s", str(e))
+        return []
+
+
+# ─── Reconciliation ────────────────────────────────────────
+
+
 def _build_reconciliation_prompt(query: str, sources: List[SourceResult]) -> str:
     """Build a prompt asking the LLM to reconcile facts across domains."""
     source_text = "\n\n".join(
@@ -264,15 +341,19 @@ async def _llm_reconcile(query: str, sources: List[SourceResult]) -> dict:
 @app.post("/api/aggregate", response_model=AggregateResponse)
 async def cross_domain_aggregate(req: AggregateRequest):
     """
-    Cross-domain aggregation — queries all search providers + warehouse,
-    domain-tags results, optionally reconciles via LLM for source-of-truth extraction.
-    Results cached in Redis (1h TTL, keyed by query+params hash).
+    Unified DeepSearch entry point — replaces deepsearch (8001) and web-api (8014).
+    
+    Flow: warehouse → external search → (optional: scrape → embed → retrieve) → reconcile
+    Results cached in Redis (1h TTL).
     """
-    # Check cache first
-    ck = _cache_key(req.query, req.max_results, req.include_warehouse, req.reconcile)
-    if cached := await _cache_get(ck):
-        log.info("aggregate_cache_hit query=%s", req.query)
-        return cached
+    # Check cache (only for non-scraping requests — scraped content is fresh)
+    if not req.enable_scraping:
+        ck = _cache_key(req.query, req.max_results, req.include_warehouse, req.reconcile)
+        if cached := await _cache_get(ck):
+            log.info("aggregate_cache_hit query=%s", req.query)
+            return cached
+    else:
+        ck = None  # don't cache scraping results
 
     import time
     t0 = time.time()
@@ -311,6 +392,18 @@ async def cross_domain_aggregate(req: AggregateRequest):
 
     domains_queried = sorted(set(s.domain for s in sources))
 
+    # 2.5 Optional: Scrape top results for full content
+    scraped_content: list = []
+    if req.enable_scraping and sources:
+        scraped_content = await _scrape_sources(sources[:req.max_scrape_urls])
+        log.info("scraped urls=%d for query=%s", len(scraped_content), req.query)
+
+    # 2.6 Optional: Embed → Retrieve via vector-store
+    rag_chunks: list = []
+    if req.enable_rag and scraped_content:
+        rag_chunks = await _rag_pipeline(req.query, scraped_content, req.rag_top_k)
+        log.info("rag chunks=%d for query=%s", len(rag_chunks), req.query)
+
     # 3. Cross-domain reconciliation via LLM
     consensus = None
     synthesis = None
@@ -341,7 +434,10 @@ async def cross_domain_aggregate(req: AggregateRequest):
         sources=sources,
         consensus=consensus,
         synthesis=synthesis,
+        answer=synthesis,  # unified field
         execution_time_ms=elapsed_ms,
+        scraped_urls=len(scraped_content),
+        rag_chunks=len(rag_chunks),
     )
 
     # Cache the result (fire-and-forget)
