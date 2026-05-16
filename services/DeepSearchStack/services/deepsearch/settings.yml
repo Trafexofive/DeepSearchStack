@@ -27,34 +27,40 @@ search:
   parallel_search: true
   
   # Default search providers (can be overridden per request)
+  # Verified working: searxng, wikipedia, stackexchange, hackernews, github, yacy
+  # Broken: whoogle (Tor blocked by Google), duckduckgo (instant answer API ≠ search), reddit (403), arxiv (429)
   default_providers:
-    - "whoogle"
     - "searxng"
-    - "duckduckgo"
     - "wikipedia"
+    - "stackexchange"
+    - "hackernews"
+    - "github"
+    - "yacy"
+    - "whoogle"
+    - "duckduckgo"
   
   # Provider-specific settings
   providers:
     whoogle:
       enabled: true
-      weight: 1.0  # Result scoring weight
-      retry_attempts: 2
+      weight: 0.5  # Degraded — Tor exits often blocked by Google, results unreliable
+      retry_attempts: 1
     searxng:
       enabled: true
       weight: 1.2
       retry_attempts: 2
     duckduckgo:
       enabled: true
-      weight: 0.9
+      weight: 0.5  # Instant Answer API only — no general web results. Consider HTML scraper
       retry_attempts: 1
     wikipedia:
       enabled: true
       weight: 1.1
       retry_attempts: 1
     yacy:
-      enabled: false  # P2P search, slower
-      weight: 0.7
-      retry_attempts: 1
+      enabled: true  # P2P search — works, decent complementary results
+      weight: 0.9
+      retry_attempts: 2
 
 # --- Scraping Configuration ---
 scraping:
