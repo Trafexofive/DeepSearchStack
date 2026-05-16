@@ -1,6 +1,6 @@
 """Crawler Service v2 — cached web scraping with content persistence.
 
-Pipeline: URL → cache check → crawl → extract → store → return
+Pipeline: URL → cache check → crawl → extract → strip boilerplate → store → return
 Cache: SQLite, TTL-based per domain.
 Storage: optional knowledge-warehouse forwarding.
 """
@@ -19,6 +19,57 @@ from typing import Optional, Dict, Any, List
 from crawl4ai import AsyncWebCrawler, CacheMode
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
+
+# ── Boilerplate stripping ─────────────────────────────────────────────────
+
+import re as _re
+
+_BOILERPLATE_PATTERNS = [
+    _re.compile(r, _re.IGNORECASE) for r in [
+        r'^\[Jump to content\]', r'^\[Skip to (content|main|navigation)\]',
+        r'^Main menu$', r'^move to sidebar', r'^(Navigation|Contents|Menu)\s*$',
+        r'^\[.*?(Privacy|Terms|Cookie|Legal|Accessibility)\]',
+        r'^(Cookie|Privacy|Terms|Legal|Accessibility)\b',
+        r'^(Theme|Language|Version)\s+(Auto|Light|Dark)',
+        r'^(Previous|Next) topic', r'^Keyboard shortcuts$',
+        r'^Press .(←|→|S|\?|Esc). to', r'^\[.*?\]\(https?://.*?(privacy|terms|cookie)\)',
+        r'^\[ Sign in \]', r'^Sign in$', r'^Navigation Menu$',
+        r'^Toggle navigation$', r'^Search or jump to',
+    ]
+]
+_BOILERPLATE_SECTIONS = [
+    'see also', 'references', 'external links', 'further reading',
+    'notes', 'footnotes', 'citations', 'bibliography', 'navigation menu',
+]
+
+def _strip_boilerplate(markdown: str) -> str:
+    if not markdown:
+        return markdown
+    lines = markdown.split('\n')
+    cleaned = []
+    skip_section = False
+    skip_level = 0
+    for line in lines:
+        stripped = line.strip()
+        heading = _re.match(r'^(#{1,6})\s+', stripped)
+        if heading:
+            level = len(heading.group(1))
+            text = stripped[heading.end():].strip().lower()
+            if skip_section and level <= skip_level:
+                skip_section = False
+            if text in _BOILERPLATE_SECTIONS:
+                skip_section = True
+                skip_level = level
+                continue
+        if skip_section:
+            continue
+        if stripped and any(p.search(stripped) for p in _BOILERPLATE_PATTERNS):
+            continue
+        cleaned.append(line)
+    result = '\n'.join(cleaned).strip()
+    result = _re.sub(r'\n{3,}', '\n\n', result)
+    return result if result else markdown
+
 
 # ─── Config ───────────────────────────────────────────────
 CACHE_DIR = Path(os.environ.get("CRAWLER_CACHE_DIR", "/app/cache"))
@@ -379,17 +430,19 @@ async def _do_crawl(req: CrawlRequest, rid: str = "") -> CrawlResponse:
             }
             _cache_put(url, cache_data)
 
-        # Forward to knowledge warehouse (with retry)
+        # Forward to knowledge warehouse (with retry, boilerplate stripped)
         if FORWARD_TO_WAREHOUSE and len(text) > 50:
+            clean_md = _strip_boilerplate(markdown)
+            clean_text = _strip_boilerplate(text)
             forwarded = await _forward_to_warehouse(
-                url=url, markdown=markdown, content=text,
+                url=url, markdown=clean_md, content=clean_text,
                 title=title or "", author=author or "", published=published or "",
-                language=language or "en", word_count=len(text.split()),
+                language=language or "en", word_count=len(clean_md.split()),
                 source_domain=domain,
             )
             if not forwarded:
                 _store_pending_forward(
-                    url=url, markdown=markdown, content=text,
+                    url=url, markdown=clean_md, content=clean_text,
                     title=title or "", source_domain=domain,
                 )
                 log.warning("warehouse_forward_queued url=%s — will retry", url[:120])

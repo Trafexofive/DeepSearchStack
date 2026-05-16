@@ -261,7 +261,7 @@ async def _warehouse_search(query: str, limit: int = 10) -> List[dict]:
 
 
 async def _vector_search(query: str, limit: int = 10) -> List[dict]:
-    """Semantic search via vector-store — second hop in progressive cascade."""
+    """Semantic search via vector-store - second hop in progressive cascade."""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(
@@ -270,13 +270,13 @@ async def _vector_search(query: str, limit: int = 10) -> List[dict]:
             )
             resp.raise_for_status()
             data = resp.json()
-        
+
         results = []
         ids_list = data.get("ids", [[]])[0]
         metas_list = data.get("metadatas", [[]])[0]
         docs_list = data.get("documents", [[]])[0]
         distances = data.get("distances", [[]])[0]
-        
+
         for i in range(len(ids_list)):
             meta = metas_list[i] if i < len(metas_list) else {}
             doc = docs_list[i] if i < len(docs_list) else ""
@@ -418,13 +418,22 @@ async def _rag_pipeline(query: str, scraped: list, top_k: int) -> list:
 
 async def _seed_warehouse(sources: List[SourceResult]):
     """Fire-and-forget: seed warehouse with search result metadata.
-
+    
     Every search enriches the warehouse for future instant retrieval.
-    Uses snippet as lightweight markdown - full content comes from crawler later.
+    Uses snippet as lightweight markdown — full content comes from crawler later.
+    Only seeds quality snippets (≥50 chars, not just dots/punctuation).
     """
     seeded = 0
     for s in sources[:20]:  # top 20 only
         if not s.url or not s.description:
+            continue
+        desc = s.description.strip()
+        # Quality gate: skip garbage snippets
+        if len(desc) < 50:
+            continue
+        # Skip snippets that are just dots/ellipsis/punctuation
+        alpha_chars = sum(1 for c in desc if c.isalpha())
+        if alpha_chars < 20:
             continue
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -432,10 +441,10 @@ async def _seed_warehouse(sources: List[SourceResult]):
                     f"{WAREHOUSE_URL}/ingest",
                     json={
                         "url": s.url,
-                        "markdown": s.description[:1000],
+                        "markdown": desc[:1000],
                         "title": s.title,
                         "source_domain": _extract_domain(s.url),
-                        "word_count": len(s.description.split()),
+                        "word_count": len(desc.split()),
                         "tags": ["search_seed", s.domain],
                     },
                 )
@@ -539,25 +548,25 @@ async def cross_domain_aggregate(req: AggregateRequest):
     t0 = time.time()
     metrics.incr("aggregate.requests")
 
-    # 1. Warehouse-first search — check local FTS5 before hitting external APIs
+    # 1. Warehouse-first search - check local FTS5 before hitting external APIs
     warehouse_results = []
     if req.include_warehouse:
         warehouse_results = await _warehouse_search(req.query, req.max_results)
-    
+
     WAREHOUSE_SUFFICIENT = 5  # skip external providers if warehouse has enough
-    
-    # 2. Vector-store semantic search — second hop in the cascade
+
+    # 2. Vector-store semantic search - second hop in the cascade
     vector_results = []
     combined_sufficient = len(warehouse_results) >= WAREHOUSE_SUFFICIENT
-    
+
     if not combined_sufficient:
         vector_results = await _vector_search(req.query, req.max_results)
         combined_sufficient = (len(warehouse_results) + len(vector_results)) >= WAREHOUSE_SUFFICIENT
-    
+
     if vector_results:
         metrics.incr("aggregate.vector_store_hits")
-    
-    # 3. External providers — only if local cascade is insufficient
+
+    # 3. External providers - only if local cascade is insufficient
     if combined_sufficient:
         metrics.incr("aggregate.local_cascade_hits")
         log.info("local_cascade_sufficient query=%s warehouse=%d vector=%d",
