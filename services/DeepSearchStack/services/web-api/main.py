@@ -277,17 +277,18 @@ async def cross_domain_aggregate(req: AggregateRequest):
     import time
     t0 = time.time()
 
-    # 1. Parallel search across all domains
-    search_task = _multi_provider_search(req.query, req.max_results)
-    warehouse_task = _warehouse_search(req.query, req.max_results) if req.include_warehouse else asyncio.sleep(0)
-
-    search_results, warehouse_results = await asyncio.gather(
-        search_task, warehouse_task, return_exceptions=True,
-    )
-    if isinstance(search_results, Exception):
+    # 1. Warehouse-first search — check local FTS5 before hitting external APIs
+    warehouse_results = []
+    if req.include_warehouse:
+        warehouse_results = await _warehouse_search(req.query, req.max_results)
+    
+    WAREHOUSE_SUFFICIENT = 5  # skip external providers if warehouse has enough
+    if len(warehouse_results) >= WAREHOUSE_SUFFICIENT:
+        log.info("warehouse_sufficient query=%s results=%d — skipping external providers",
+                 req.query, len(warehouse_results))
         search_results = []
-    if isinstance(warehouse_results, Exception):
-        warehouse_results = []
+    else:
+        search_results = await _multi_provider_search(req.query, req.max_results)
 
     # 2. Merge + domain-tag + deduplicate
     seen_urls = set()
