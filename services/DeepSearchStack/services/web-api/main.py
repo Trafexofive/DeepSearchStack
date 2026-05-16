@@ -327,6 +327,42 @@ async def _rag_pipeline(query: str, scraped: list, top_k: int) -> list:
         return []
 
 
+async def _seed_warehouse(sources: List[SourceResult]):
+    """Fire-and-forget: seed warehouse with search result metadata.
+    
+    Every search enriches the warehouse for future instant retrieval.
+    Uses snippet as lightweight markdown — full content comes from crawler later.
+    """
+    seeded = 0
+    for s in sources[:20]:  # top 20 only
+        if not s.url or not s.description:
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    f"{WAREHOUSE_URL}/ingest",
+                    json={
+                        "url": s.url,
+                        "markdown": s.description[:1000],
+                        "title": s.title,
+                        "source_domain": _extract_domain(s.url),
+                        "word_count": len(s.description.split()),
+                        "tags": ["search_seed", s.domain],
+                    },
+                )
+                if resp.status_code == 200 and resp.json().get("ingested"):
+                    seeded += 1
+        except Exception:
+            pass
+    if seeded:
+        log.info("warehouse_seeded sources=%d", seeded)
+
+
+def _extract_domain(url: str) -> str:
+    from urllib.parse import urlparse
+    return urlparse(url).netloc or "unknown"
+
+
 # ─── Reconciliation ────────────────────────────────────────
 
 
@@ -495,6 +531,9 @@ async def cross_domain_aggregate(req: AggregateRequest):
 
     # Cache the result (fire-and-forget)
     asyncio.create_task(_cache_set(ck, response.model_dump()))
+
+    # Seed warehouse with search result metadata (fire-and-forget)
+    asyncio.create_task(_seed_warehouse(sources))
 
     return response
 
