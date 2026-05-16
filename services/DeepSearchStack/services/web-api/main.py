@@ -260,6 +260,43 @@ async def _warehouse_search(query: str, limit: int = 10) -> List[dict]:
         return []
 
 
+async def _vector_search(query: str, limit: int = 10) -> List[dict]:
+    """Semantic search via vector-store — second hop in progressive cascade."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{VECTOR_STORE_URL}/query",
+                json={"query_text": query, "n_results": limit},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        
+        results = []
+        ids_list = data.get("ids", [[]])[0]
+        metas_list = data.get("metadatas", [[]])[0]
+        docs_list = data.get("documents", [[]])[0]
+        distances = data.get("distances", [[]])[0]
+        
+        for i in range(len(ids_list)):
+            meta = metas_list[i] if i < len(metas_list) else {}
+            doc = docs_list[i] if i < len(docs_list) else ""
+            dist = distances[i] if i < len(distances) else 1.0
+            url = meta.get("url", "")
+            if not url:
+                continue
+            results.append({
+                "url": url,
+                "title": meta.get("title", "") or doc[:80],
+                "description": doc[:300],
+                "source": "vector_store",
+                "confidence": max(0.3, 1.0 - dist),  # convert distance to confidence
+            })
+        return results
+    except Exception as e:
+        log.warning("vector_search_failed: %s", str(e))
+        return []
+
+
 def _classify_domain(source: str) -> str:
     return DOMAIN_MAP.get(source, "unknown")
 
@@ -502,26 +539,39 @@ async def cross_domain_aggregate(req: AggregateRequest):
     t0 = time.time()
     metrics.incr("aggregate.requests")
 
-    # 1. Warehouse-first search - check local FTS5 before hitting external APIs
+    # 1. Warehouse-first search — check local FTS5 before hitting external APIs
     warehouse_results = []
     if req.include_warehouse:
         warehouse_results = await _warehouse_search(req.query, req.max_results)
-
+    
     WAREHOUSE_SUFFICIENT = 5  # skip external providers if warehouse has enough
-    if len(warehouse_results) >= WAREHOUSE_SUFFICIENT:
-        metrics.incr("aggregate.warehouse_hits")
-        log.info("warehouse_sufficient query=%s results=%d — skipping external providers",
-                 req.query, len(warehouse_results))
+    
+    # 2. Vector-store semantic search — second hop in the cascade
+    vector_results = []
+    combined_sufficient = len(warehouse_results) >= WAREHOUSE_SUFFICIENT
+    
+    if not combined_sufficient:
+        vector_results = await _vector_search(req.query, req.max_results)
+        combined_sufficient = (len(warehouse_results) + len(vector_results)) >= WAREHOUSE_SUFFICIENT
+    
+    if vector_results:
+        metrics.incr("aggregate.vector_store_hits")
+    
+    # 3. External providers — only if local cascade is insufficient
+    if combined_sufficient:
+        metrics.incr("aggregate.local_cascade_hits")
+        log.info("local_cascade_sufficient query=%s warehouse=%d vector=%d",
+                 req.query, len(warehouse_results), len(vector_results))
         search_results = []
     else:
         metrics.incr("aggregate.external_searches")
         search_results = await _multi_provider_search(req.query, req.max_results)
 
-    # 2. Merge + domain-tag + deduplicate
+    # 4. Merge + domain-tag + deduplicate (warehouse + vector + external)
     seen_urls = set()
     sources: List[SourceResult] = []
 
-    for r in search_results + warehouse_results:
+    for r in search_results + warehouse_results + vector_results:
         url = r.get("url", "")
         if not url or url in seen_urls:
             continue
@@ -713,7 +763,7 @@ async def health():
 
 @app.get("/api/metrics")
 async def get_metrics():
-    """Service metrics — request counts, latencies, cache/warehouse hit rates."""
+    """Service metrics - request counts, latencies, cache/warehouse hit rates."""
     snap = metrics.snapshot()
     # Add derived metrics
     total = snap["counters"].get("aggregate.requests", 0)
@@ -721,8 +771,9 @@ async def get_metrics():
     wh_hits = snap["counters"].get("aggregate.warehouse_hits", 0)
     snap["derived"] = {
         "cache_hit_rate": round(cache_hits / total, 3) if total > 0 else 0,
-        "warehouse_hit_rate": round(wh_hits / total, 3) if total > 0 else 0,
-        "external_search_rate": round(1 - (wh_hits / total), 3) if total > 0 else 1.0,
+        "local_cascade_rate": round(snap["counters"].get("aggregate.local_cascade_hits", 0) / total, 3) if total > 0 else 0,
+        "external_search_rate": round(snap["counters"].get("aggregate.external_searches", 0) / total, 3) if total > 0 else 0,
+        "vector_store_rate": round(snap["counters"].get("aggregate.vector_store_hits", 0) / total, 3) if total > 0 else 0,
     }
     return snap
 
