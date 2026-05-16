@@ -1,12 +1,12 @@
 """
-web-api — DeepSearch Cross-Domain Aggregation Orchestrator
+web-api - DeepSearch Cross-Domain Aggregation Orchestrator
 
 Endpoints:
-  POST /api/search/stream     — search → synthesize (streaming)
-  POST /api/aggregate         — cross-domain aggregation with source-of-truth extraction
-  POST /api/completion/stream — direct LLM completion proxy
-  GET  /api/providers         — list available LLM providers
-  GET  /health                — health + dependency status
+  POST /api/search/stream     - search → synthesize (streaming)
+  POST /api/aggregate         - cross-domain aggregation with source-of-truth extraction
+  POST /api/completion/stream - direct LLM completion proxy
+  GET  /api/providers         - list available LLM providers
+  GET  /health                - health + dependency status
 """
 
 import asyncio
@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-# Redis cache — optional, fails open if unreachable
+# Redis cache - optional, fails open if unreachable
 _REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 _redis = None
 _CACHE_TTL = int(os.environ.get("AGGREGATE_CACHE_TTL", "3600"))  # 1 hour
@@ -38,7 +38,7 @@ async def _get_redis():
         await _redis.ping()
         log.info("Redis cache connected: %s", _REDIS_URL)
     except Exception as e:
-        log.warning("Redis unavailable — caching disabled: %s", e)
+        log.warning("Redis unavailable - caching disabled: %s", e)
         _redis = False
     return _redis
 
@@ -152,7 +152,7 @@ app = FastAPI(title="DeepSearch Web API", version="6.0.0")
 
 # ─── Helpers ───────────────────────────────────────────────
 
-# Provider list — 7 verified-working, non-redundant providers across 7 domains.
+# Provider list - 7 verified-working, non-redundant providers across 7 domains.
 # Redundant providers removed: whoogle/duckduckgo (SearXNG covers Google+Bing+DDG),
 #   pubmed/crossref/internetarchive (lower priority, keep domain count lean).
 # IP-blocked from Docker: reddit (needs proxy).
@@ -169,7 +169,7 @@ _AGGREGATE_PROVIDERS = [
 async def _multi_provider_search(query: str, max_results: int) -> List[dict]:
     """Query ALL search providers via search-gateway with deadline."""
     try:
-        # 12s deadline — return whatever we have by then
+        # 12s deadline - return whatever we have by then
         async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.post(
                 f"{SEARCH_GATEWAY_URL}/search",
@@ -267,7 +267,7 @@ def _strip_boilerplate(markdown: str) -> str:
 async def _scrape_sources(sources: List[SourceResult]) -> list:
     """Scrape full content from source URLs via crawler service."""
     sem = asyncio.Semaphore(10)  # matches crawler concurrency
-    
+
     async def scrape_one(s: SourceResult):
         async with sem:
             try:
@@ -286,7 +286,7 @@ async def _scrape_sources(sources: List[SourceResult]) -> list:
             except Exception as e:
                 log.warning("scrape_failed url=%s: %s", s.url, str(e))
             return None
-    
+
     results = await asyncio.gather(*[scrape_one(s) for s in sources])
     return [r for r in results if r and r.get("markdown")]
 
@@ -299,7 +299,7 @@ async def _rag_pipeline(query: str, scraped: list, top_k: int) -> list:
                 for s in scraped if s.get("markdown")]
         if not docs:
             return []
-        
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             await client.post(f"{VECTOR_STORE_URL}/embed", json={"documents": docs})
             resp = await client.post(
@@ -329,9 +329,9 @@ async def _rag_pipeline(query: str, scraped: list, top_k: int) -> list:
 
 async def _seed_warehouse(sources: List[SourceResult]):
     """Fire-and-forget: seed warehouse with search result metadata.
-    
+
     Every search enriches the warehouse for future instant retrieval.
-    Uses snippet as lightweight markdown — full content comes from crawler later.
+    Uses snippet as lightweight markdown - full content comes from crawler later.
     """
     seeded = 0
     for s in sources[:20]:  # top 20 only
@@ -430,12 +430,12 @@ async def _llm_reconcile(query: str, sources: List[SourceResult]) -> dict:
 @app.post("/api/aggregate", response_model=AggregateResponse)
 async def cross_domain_aggregate(req: AggregateRequest):
     """
-    Unified DeepSearch entry point — replaces deepsearch (8001) and web-api (8014).
-    
+    Unified DeepSearch entry point - replaces deepsearch (8001) and web-api (8014).
+
     Flow: warehouse → external search → (optional: scrape → embed → retrieve) → reconcile
     Results cached in Redis (1h TTL).
     """
-    # Check cache (only for non-scraping requests — scraped content is fresh)
+    # Check cache (only for non-scraping requests - scraped content is fresh)
     if not req.enable_scraping:
         ck = _cache_key(req.query, req.max_results, req.include_warehouse, req.reconcile)
         if cached := await _cache_get(ck):
@@ -447,14 +447,14 @@ async def cross_domain_aggregate(req: AggregateRequest):
     import time
     t0 = time.time()
 
-    # 1. Warehouse-first search — check local FTS5 before hitting external APIs
+    # 1. Warehouse-first search - check local FTS5 before hitting external APIs
     warehouse_results = []
     if req.include_warehouse:
         warehouse_results = await _warehouse_search(req.query, req.max_results)
-    
+
     WAREHOUSE_SUFFICIENT = 5  # skip external providers if warehouse has enough
     if len(warehouse_results) >= WAREHOUSE_SUFFICIENT:
-        log.info("warehouse_sufficient query=%s results=%d — skipping external providers",
+        log.info("warehouse_sufficient query=%s results=%d - skipping external providers",
                  req.query, len(warehouse_results))
         search_results = []
     else:
@@ -669,8 +669,8 @@ class IngestURLsResponse(BaseModel):
 
 @app.post("/api/ingest/urls", response_model=IngestURLsResponse)
 async def ingest_urls(req: IngestURLsRequest):
-    """Bulk URL ingestion — crawl + warehouse store.
-    
+    """Bulk URL ingestion - crawl + warehouse store.
+
     Accepts up to 100 URLs. Crawls in parallel via crawler service,
     results automatically forwarded to knowledge warehouse.
     Returns crawl stats and updated warehouse entry count.
@@ -679,9 +679,9 @@ async def ingest_urls(req: IngestURLsRequest):
     urls = list(dict.fromkeys(u.strip() for u in req.urls if u.strip().startswith("http")))
     if not urls:
         raise HTTPException(status_code=400, detail="No valid HTTP URLs provided")
-    
+
     log.info("ingest_urls submitting=%d urls", len(urls))
-    
+
     try:
         async with httpx.AsyncClient(timeout=req.timeout + 30) as client:
             resp = await client.post(
@@ -698,7 +698,7 @@ async def ingest_urls(req: IngestURLsRequest):
     except Exception as e:
         log.error("ingest_urls_crawl_failed: %s", str(e))
         raise HTTPException(status_code=502, detail=f"Crawler service failed: {str(e)}")
-    
+
     # Get current warehouse stats
     warehouse_entries = 0
     try:
@@ -708,7 +708,7 @@ async def ingest_urls(req: IngestURLsRequest):
             warehouse_entries = wh_resp.json().get("total_entries", 0)
     except Exception:
         pass
-    
+
     return IngestURLsResponse(
         urls_submitted=len(urls),
         success_count=batch_result.get("success_count", 0),
@@ -717,3 +717,99 @@ async def ingest_urls(req: IngestURLsRequest):
         total_duration_ms=batch_result.get("total_duration_ms", 0),
         warehouse_entries_after=warehouse_entries,
     )
+
+
+class IngestFeedRequest(BaseModel):
+    feed_url: str = Field(..., min_length=1, description="RSS/Atom feed URL")
+    max_items: int = Field(default=20, ge=1, le=100)
+    timeout: int = Field(default=20, ge=5, le=60)
+
+class IngestFeedResponse(BaseModel):
+    feed_url: str
+    feed_title: str = ""
+    items_found: int = 0
+    urls_extracted: int = 0
+    queued_for_crawl: int = 0
+
+
+@app.post("/api/ingest/feed", response_model=IngestFeedResponse)
+async def ingest_feed(req: IngestFeedRequest):
+    """Ingest an RSS/Atom feed — extract links, queue for crawling."""
+    import xml.etree.ElementTree as ET
+    
+    # Fetch feed
+    try:
+        async with httpx.AsyncClient(timeout=req.timeout) as client:
+            resp = await client.get(
+                req.feed_url,
+                headers={"User-Agent": "DeepSearchStack/1.0 (feed reader)"},
+            )
+            resp.raise_for_status()
+            xml_text = resp.text
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Feed fetch failed: {str(e)}")
+    
+    # Parse feed (RSS or Atom)
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid XML: {str(e)}")
+    
+    # Extract feed title
+    feed_title = ""
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    
+    # RSS 2.0
+    channel = root.find("channel")
+    if channel is not None:
+        feed_title = (channel.findtext("title") or "").strip()
+        items = channel.findall("item")
+        links = []
+        for item in items[:req.max_items]:
+            link = item.findtext("link")
+            if link:
+                links.append(link.strip())
+    else:
+        # Atom feed
+        feed_title = (root.findtext("atom:title", namespaces=ns) or root.findtext("title") or "").strip()
+        entries = root.findall("atom:entry", ns) or root.findall("entry")
+        links = []
+        for entry in entries[:req.max_items]:
+            link_el = entry.find("atom:link", ns) or entry.find("link")
+            if link_el is not None:
+                href = link_el.get("href") or link_el.text
+                if href:
+                    links.append(href.strip())
+    
+    if not links:
+        return IngestFeedResponse(
+            feed_url=req.feed_url, feed_title=feed_title,
+            items_found=0, urls_extracted=0, queued_for_crawl=0,
+        )
+    
+    # Queue for crawling (fire-and-forget to not block)
+    asyncio.create_task(_crawl_feed_links(links))
+    
+    log.info("feed_ingested url=%s title=%s links=%d", req.feed_url, feed_title, len(links))
+    return IngestFeedResponse(
+        feed_url=req.feed_url, feed_title=feed_title,
+        items_found=len(links), urls_extracted=len(links),
+        queued_for_crawl=len(links),
+    )
+
+
+async def _crawl_feed_links(links: list[str]):
+    """Background: crawl feed links in batches."""
+    batch_size = 10
+    for i in range(0, len(links), batch_size):
+        batch = links[i:i + batch_size]
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                await client.post(
+                    f"{CRAWLER_URL}/crawl/batch",
+                    json={"urls": batch, "timeout": 20},
+                )
+            log.info("feed_crawl_batch done=%d/%d", min(i + batch_size, len(links)), len(links))
+        except Exception as e:
+            log.warning("feed_crawl_batch_failed: %s", str(e))
+        await asyncio.sleep(2)  # gentle pacing

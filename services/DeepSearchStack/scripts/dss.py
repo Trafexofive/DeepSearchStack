@@ -9,7 +9,7 @@ Usage:
     python3 scripts/dss.py crawl <url>          # Single URL crawl
     python3 scripts/dss.py warehouse [query]    # Warehouse stats or search
     python3 scripts/dss.py stream "query"       # Streaming search (SSE)
-    python3 scripts/dss.py pending              # Pending warehouse forwards
+    python3 scripts/dss.py feed <rss_url>      # Ingest RSS/Atom feed
 
 Environment:
     DSS_WEB_API     Web API URL (default: http://localhost:8014)
@@ -104,11 +104,18 @@ async def cmd_stream(client: DSSClient, query: str):
     print()
 
 
-async def cmd_pending(client: DSSClient):
-    pending = await client.crawler_pending()
-    print(f"Pending forwards: {pending['total']}")
-    for p in pending["pending"]:
-        print(f"  [{p['id']}] {p['url'][:100]} — {p['attempts']} attempts")
+async def cmd_feed(client: DSSClient, feed_url: str):
+    """Ingest an RSS/Atom feed."""
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        resp = await http.post(
+            f"{client.web_api}/api/ingest/feed",
+            json={"feed_url": feed_url, "max_items": 10},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    print(f"Feed: {data['feed_title']}")
+    print(f"  Items found: {data['items_found']}")
+    print(f"  Queued for crawl: {data['queued_for_crawl']}")
 
 
 COMMANDS = {
@@ -119,6 +126,7 @@ COMMANDS = {
     "warehouse": (cmd_warehouse, "Warehouse stats or search"),
     "stream": (cmd_stream, "Streaming search (SSE)"),
     "pending": (cmd_pending, "Pending warehouse forwards"),
+    "feed": (cmd_feed, "Ingest RSS/Atom feed"),
 }
 
 
@@ -173,6 +181,11 @@ async def main():
             await cmd_stream(client, " ".join(args))
         elif cmd_name == "pending":
             await cmd_pending(client)
+        elif cmd_name == "feed":
+            if not args:
+                print("Usage: dss.py feed <rss_url>")
+                sys.exit(1)
+            await cmd_feed(client, args[0])
 
 
 if __name__ == "__main__":

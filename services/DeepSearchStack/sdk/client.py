@@ -229,6 +229,17 @@ class DSSClient:
                  result.warehouse_entries_after)
         return result
 
+    async def ingest_feed(self, feed_url: str, max_items: int = 10) -> dict:
+        """Ingest an RSS/Atom feed — extract links, queue for crawling."""
+        resp = await self.client.post(
+            f"{self.web_api}/api/ingest/feed",
+            json={"feed_url": feed_url, "max_items": max_items},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        log.info("feed ingested: %s — %d items", data.get("feed_title", ""), data.get("items_found", 0))
+        return data
+
     async def warehouse_stats(self) -> dict:
         """Get knowledge warehouse statistics."""
         resp = await self.client.get(f"{self.warehouse}/stats")
