@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 CACHE_DIR = Path(os.environ.get("CRAWLER_CACHE_DIR", "/app/cache"))
 CACHE_DB = CACHE_DIR / "cache.db"
 DEFAULT_TTL_SECONDS = int(os.environ.get("CRAWLER_CACHE_TTL", "86400"))  # 24h
+CRAWL_CONCURRENCY = int(os.environ.get("CRAWLER_CONCURRENCY", "10"))  # concurrent crawls
 WAREHOUSE_URL = os.environ.get("KNOWLEDGE_WAREHOUSE_URL", "http://knowledge-warehouse:8009")
 FORWARD_TO_WAREHOUSE = os.environ.get("FORWARD_TO_WAREHOUSE", "false").lower() == "true"
 
@@ -116,6 +117,92 @@ def _cache_stats() -> dict:
     return {"total_entries": total, "fresh_entries": fresh, "domains": [{"domain": d, "count": c} for d, c in domains]}
 
 
+# ─── Warehouse Forwarding (reliable delivery) ──────────────────────────────
+
+_PENDING_FORWARD_DB = CACHE_DIR / "pending_forwards.db"
+
+def _init_pending_forwards():
+    with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pending_forwards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                markdown TEXT NOT NULL,
+                content TEXT DEFAULT '',
+                title TEXT DEFAULT '',
+                source_domain TEXT DEFAULT '',
+                attempts INTEGER DEFAULT 0,
+                last_attempt REAL DEFAULT 0,
+                created_at REAL NOT NULL
+            )
+        """)
+        conn.commit()
+
+_init_pending_forwards()
+
+async def _forward_to_warehouse(**payload) -> bool:
+    """Forward content to warehouse with 3 retries, exponential backoff."""
+    import httpx
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(f"{WAREHOUSE_URL}/ingest", json=payload)
+                if resp.status_code == 200:
+                    return True
+                log.warning("warehouse_forward_fail attempt=%d/%d status=%d url=%s",
+                           attempt + 1, max_retries, resp.status_code, payload.get("url", "")[:120])
+        except Exception as e:
+            log.warning("warehouse_forward_error attempt=%d/%d url=%s: %s",
+                       attempt + 1, max_retries, payload.get("url", "")[:120], str(e))
+        if attempt < max_retries - 1:
+            await asyncio.sleep(2 ** attempt)  # 1s, 2s, 4s
+    return False
+
+def _store_pending_forward(**payload):
+    """Store failed forward in persistent queue for background retry."""
+    with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+        conn.execute("""
+            INSERT INTO pending_forwards (url, markdown, content, title, source_domain, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            payload.get("url", ""), payload.get("markdown", ""),
+            payload.get("content", ""), payload.get("title", ""),
+            payload.get("source_domain", ""), time.time(),
+        ))
+        conn.commit()
+
+async def _retry_pending_forwards():
+    """Background task: retry pending warehouse forwards every 60s."""
+    while True:
+        await asyncio.sleep(60)
+        with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+            rows = conn.execute(
+                "SELECT * FROM pending_forwards WHERE attempts < 10 ORDER BY id LIMIT 20"
+            ).fetchall()
+        if not rows:
+            continue
+        cols = ["id", "url", "markdown", "content", "title", "source_domain", "attempts", "last_attempt", "created_at"]
+        for row in rows:
+            d = dict(zip(cols, row))
+            success = await _forward_to_warehouse(
+                url=d["url"], markdown=d["markdown"], content=d["content"],
+                title=d["title"], source_domain=d["source_domain"],
+                word_count=len(d["markdown"].split()) if d["markdown"] else 0,
+                language="en", author="", published="",
+            )
+            with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+                if success:
+                    conn.execute("DELETE FROM pending_forwards WHERE id = ?", (d["id"],))
+                    log.info("pending_forward_ok id=%d url=%s", d["id"], d["url"][:120])
+                else:
+                    conn.execute(
+                        "UPDATE pending_forwards SET attempts = attempts + 1, last_attempt = ? WHERE id = ?",
+                        (time.time(), d["id"]),
+                    )
+                conn.commit()
+
+
 # ─── Models ───────────────────────────────────────────────
 class CrawlRequest(BaseModel):
     url: str = Field(..., min_length=1, max_length=2048)
@@ -183,9 +270,12 @@ async def lifespan(app: FastAPI):
     log.info("Starting crawl4ai AsyncWebCrawler...")
     _crawler = AsyncWebCrawler(verbose=False)
     await _crawler.start()
-    log.info("Crawler v2 ready — cache at %s", CACHE_DB)
+    # Background warehouse forward retry worker
+    retry_task = asyncio.create_task(_retry_pending_forwards())
+    log.info("Crawler v2 ready — cache at %s, forward retry worker started", CACHE_DB)
     yield
     log.info("Shutting down crawler...")
+    retry_task.cancel()
     if _crawler:
         await _crawler.close()
     log.info("Crawler stopped")
@@ -289,23 +379,20 @@ async def _do_crawl(req: CrawlRequest, rid: str = "") -> CrawlResponse:
             }
             _cache_put(url, cache_data)
 
-        # Forward to knowledge warehouse
-        if FORWARD_TO_WAREHOUSE:
-            try:
-                import httpx
-                async with httpx.AsyncClient(timeout=5.0) as wh_client:
-                    await wh_client.post(
-                        f"{WAREHOUSE_URL}/ingest",
-                        json={
-                            "url": url, "markdown": markdown, "content": text,
-                            "title": title, "author": author,
-                            "published": published, "language": language,
-                            "word_count": len(text.split()),
-                            "source_domain": domain,
-                        },
-                    )
-            except Exception:
-                pass  # warehouse is optional, don't fail the crawl
+        # Forward to knowledge warehouse (with retry)
+        if FORWARD_TO_WAREHOUSE and len(text) > 50:
+            forwarded = await _forward_to_warehouse(
+                url=url, markdown=markdown, content=text,
+                title=title or "", author=author or "", published=published or "",
+                language=language or "en", word_count=len(text.split()),
+                source_domain=domain,
+            )
+            if not forwarded:
+                _store_pending_forward(
+                    url=url, markdown=markdown, content=text,
+                    title=title or "", source_domain=domain,
+                )
+                log.warning("warehouse_forward_queued url=%s — will retry", url[:120])
 
         log.info("crawl_ok [%s] url=%s title=%s len=%d %.0fms", rid, url[:120], title, len(markdown), elapsed)
         return resp
@@ -347,7 +434,7 @@ async def crawl_url(req: CrawlRequest, request: Request):
 async def crawl_batch(req: BatchCrawlRequest, request: Request):
     rid = request.headers.get("X-Request-ID", "")
     started = time.monotonic()
-    sem = asyncio.Semaphore(5)
+    sem = asyncio.Semaphore(CRAWL_CONCURRENCY)
 
     async def crawl_one(url: str) -> CrawlResponse:
         async with sem:
@@ -382,25 +469,60 @@ async def cache_clear():
 
 @app.get("/health")
 async def health():
+    # Count pending forwards
+    with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+        pending = conn.execute("SELECT COUNT(*) FROM pending_forwards").fetchone()[0]
     return {
         "status": "healthy" if _crawler else "degraded",
         "cache_entries": _cache_stats()["total_entries"],
-        "version": "2.0.0",
+        "pending_forwards": pending,
+        "version": "2.1.0",
     }
 
 @app.get("/")
 async def root():
     return {
         "service": "crawler",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "endpoints": {
             "POST /crawl": "Single URL → markdown with caching",
             "POST /crawl/batch": "Batch crawl with concurrency control",
             "GET /cache/stats": "Cache statistics",
             "POST /cache/clear": "Clear all cached content",
+            "GET /crawl/pending": "Pending warehouse forwards",
+            "POST /crawl/retry-pending": "Force retry pending forwards",
             "GET /health": "Health check",
         },
     }
+
+
+@app.get("/crawl/pending")
+async def pending_forwards():
+    """List pending warehouse forwards."""
+    with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, url, title, attempts, last_attempt, created_at FROM pending_forwards ORDER BY id LIMIT 100"
+        ).fetchall()
+        return {
+            "total": len(rows),
+            "pending": [
+                {
+                    "id": r["id"], "url": r["url"], "title": r["title"],
+                    "attempts": r["attempts"],
+                    "last_attempt": r["last_attempt"] or 0,
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ],
+        }
+
+
+@app.post("/crawl/retry-pending")
+async def retry_pending():
+    """Force immediate retry of pending warehouse forwards."""
+    await _retry_pending_forwards()
+    return {"retried": True}
 
 if __name__ == "__main__":
     import uvicorn

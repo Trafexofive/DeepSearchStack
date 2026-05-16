@@ -266,7 +266,7 @@ def _strip_boilerplate(markdown: str) -> str:
 
 async def _scrape_sources(sources: List[SourceResult]) -> list:
     """Scrape full content from source URLs via crawler service."""
-    sem = asyncio.Semaphore(5)
+    sem = asyncio.Semaphore(10)  # matches crawler concurrency
     
     async def scrape_one(s: SourceResult):
         async with sem:
