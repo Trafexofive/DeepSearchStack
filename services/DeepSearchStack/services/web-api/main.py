@@ -607,5 +607,74 @@ async def health():
 async def root():
     return {
         "service": "DeepSearch Web API Orchestrator",
-        "endpoints": ["/api/aggregate", "/api/search/stream", "/api/completion/stream", "/api/providers"],
+        "endpoints": ["/api/aggregate", "/api/search/stream", "/api/completion/stream", "/api/providers", "/api/ingest/urls"],
     }
+
+
+# ─── Provisioning: Bulk URL Ingestion ──────────────────────────────────────
+
+class IngestURLsRequest(BaseModel):
+    urls: List[str] = Field(..., min_items=1, max_items=100, description="URLs to crawl and store")
+    extraction_strategy: str = Field(default="markdown", pattern="^(markdown|text)$")
+    timeout: int = Field(default=20, ge=5, le=60)
+    bypass_cache: bool = False
+
+class IngestURLsResponse(BaseModel):
+    urls_submitted: int
+    success_count: int
+    failure_count: int
+    cache_hits: int
+    total_duration_ms: float
+    warehouse_entries_after: int
+
+
+@app.post("/api/ingest/urls", response_model=IngestURLsResponse)
+async def ingest_urls(req: IngestURLsRequest):
+    """Bulk URL ingestion — crawl + warehouse store.
+    
+    Accepts up to 100 URLs. Crawls in parallel via crawler service,
+    results automatically forwarded to knowledge warehouse.
+    Returns crawl stats and updated warehouse entry count.
+    """
+    # Validate and dedup URLs
+    urls = list(dict.fromkeys(u.strip() for u in req.urls if u.strip().startswith("http")))
+    if not urls:
+        raise HTTPException(status_code=400, detail="No valid HTTP URLs provided")
+    
+    log.info("ingest_urls submitting=%d urls", len(urls))
+    
+    try:
+        async with httpx.AsyncClient(timeout=req.timeout + 30) as client:
+            resp = await client.post(
+                f"{CRAWLER_URL}/crawl/batch",
+                json={
+                    "urls": urls,
+                    "extraction_strategy": req.extraction_strategy,
+                    "timeout": req.timeout,
+                    "bypass_cache": req.bypass_cache,
+                },
+            )
+            resp.raise_for_status()
+            batch_result = resp.json()
+    except Exception as e:
+        log.error("ingest_urls_crawl_failed: %s", str(e))
+        raise HTTPException(status_code=502, detail=f"Crawler service failed: {str(e)}")
+    
+    # Get current warehouse stats
+    warehouse_entries = 0
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            wh_resp = await client.get(f"{WAREHOUSE_URL}/stats")
+            wh_resp.raise_for_status()
+            warehouse_entries = wh_resp.json().get("total_entries", 0)
+    except Exception:
+        pass
+    
+    return IngestURLsResponse(
+        urls_submitted=len(urls),
+        success_count=batch_result.get("success_count", 0),
+        failure_count=batch_result.get("failure_count", 0),
+        cache_hits=batch_result.get("cache_hits", 0),
+        total_duration_ms=batch_result.get("total_duration_ms", 0),
+        warehouse_entries_after=warehouse_entries,
+    )
