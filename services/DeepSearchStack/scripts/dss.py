@@ -118,6 +118,29 @@ async def cmd_feed(client: DSSClient, feed_url: str):
     print(f"  Queued for crawl: {data['queued_for_crawl']}")
 
 
+async def cmd_pending(client: DSSClient):
+    pending = await client.crawler_pending()
+    print(f"Pending forwards: {pending['total']}")
+    for p in pending["pending"]:
+        print(f"  [{p['id']}] {p['url'][:100]} — {p['attempts']} attempts")
+
+
+async def cmd_metrics(client: DSSClient):
+    """Show service metrics."""
+    m = await client.metrics()
+    print(f"Uptime: {m['uptime_seconds']:.0f}s")
+    print(f"\n── Counters ──")
+    for k, v in sorted(m.get('counters', {}).items()):
+        print(f"  {k:35s} {v}")
+    print(f"\n── Latency (ms) ──")
+    for k, v in sorted(m.get('timers_ms', {}).items()):
+        print(f"  {k:35s} p50={v['p50']:.0f} p95={v['p95']:.0f} avg={v['avg']:.0f} n={v['count']}")
+    if 'derived' in m:
+        print(f"\n── Derived ──")
+        for k, v in m['derived'].items():
+            print(f"  {k:35s} {v}")
+
+
 COMMANDS = {
     "health": (cmd_health, "Health check all services"),
     "search": (cmd_search, "Aggregate search with reconciliation"),
@@ -126,6 +149,7 @@ COMMANDS = {
     "warehouse": (cmd_warehouse, "Warehouse stats or search"),
     "stream": (cmd_stream, "Streaming search (SSE)"),
     "pending": (cmd_pending, "Pending warehouse forwards"),
+    "metrics": (cmd_metrics, "Service metrics"),
     "feed": (cmd_feed, "Ingest RSS/Atom feed"),
 }
 
@@ -186,6 +210,8 @@ async def main():
                 print("Usage: dss.py feed <rss_url>")
                 sys.exit(1)
             await cmd_feed(client, args[0])
+        elif cmd_name == "metrics":
+            await cmd_metrics(client)
 
 
 if __name__ == "__main__":

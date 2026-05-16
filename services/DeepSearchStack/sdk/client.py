@@ -280,6 +280,12 @@ class DSSClient:
 
     # ── Health ───────────────────────────────────────────────────
 
+    async def metrics(self) -> dict:
+        """Get service metrics."""
+        resp = await self.client.get(f"{self.web_api}/api/metrics")
+        resp.raise_for_status()
+        return resp.json()
+
     async def health(self) -> dict[str, str]:
         """Check health of all DSS services."""
         services = {

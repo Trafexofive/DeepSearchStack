@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -78,6 +79,57 @@ SEARCH_GATEWAY_URL = os.environ.get("SEARCH_GATEWAY_URL", "http://search-gateway
 WAREHOUSE_URL = os.environ.get("WAREHOUSE_URL", "http://knowledge-warehouse:8009")
 CRAWLER_URL = os.environ.get("CRAWLER_URL", "http://crawler:8000")
 VECTOR_STORE_URL = os.environ.get("VECTOR_STORE_URL", "http://vector-store:8004")
+
+# ─── Metrics (in-memory, no external deps) ──────────────────
+
+import threading
+from collections import defaultdict
+
+class Metrics:
+    """Thread-safe in-memory metrics collector."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._counters: dict[str, int] = defaultdict(int)
+        self._timers: dict[str, list] = defaultdict(list)  # last 100 values
+        self._gauges: dict[str, int] = defaultdict(int)
+        self._start_time = time.time()
+
+    def incr(self, key: str, n: int = 1):
+        with self._lock:
+            self._counters[key] += n
+
+    def time(self, key: str, ms: float):
+        with self._lock:
+            buf = self._timers[key]
+            buf.append(ms)
+            if len(buf) > 100:
+                buf.pop(0)
+
+    def gauge(self, key: str, value: int):
+        with self._lock:
+            self._gauges[key] = value
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            timers = {}
+            for k, vals in self._timers.items():
+                if vals:
+                    sv = sorted(vals)
+                    timers[k] = {
+                        "count": len(vals),
+                        "p50": sv[len(sv)//2],
+                        "p95": sv[int(len(sv)*0.95)],
+                        "p99": sv[int(len(sv)*0.99)],
+                        "avg": sum(vals)/len(vals),
+                    }
+            return {
+                "uptime_seconds": time.time() - self._start_time,
+                "counters": dict(self._counters),
+                "timers_ms": timers,
+                "gauges": dict(self._gauges),
+            }
+
+metrics = Metrics()
 
 # ─── Domain Classification ─────────────────────────────────
 DOMAIN_MAP = {
@@ -439,13 +491,16 @@ async def cross_domain_aggregate(req: AggregateRequest):
     if not req.enable_scraping:
         ck = _cache_key(req.query, req.max_results, req.include_warehouse, req.reconcile)
         if cached := await _cache_get(ck):
+            metrics.incr("aggregate.cache_hits")
             log.info("aggregate_cache_hit query=%s", req.query)
             return cached
+        metrics.incr("aggregate.cache_misses")
     else:
         ck = None  # don't cache scraping results
 
     import time
     t0 = time.time()
+    metrics.incr("aggregate.requests")
 
     # 1. Warehouse-first search - check local FTS5 before hitting external APIs
     warehouse_results = []
@@ -454,10 +509,12 @@ async def cross_domain_aggregate(req: AggregateRequest):
 
     WAREHOUSE_SUFFICIENT = 5  # skip external providers if warehouse has enough
     if len(warehouse_results) >= WAREHOUSE_SUFFICIENT:
-        log.info("warehouse_sufficient query=%s results=%d - skipping external providers",
+        metrics.incr("aggregate.warehouse_hits")
+        log.info("warehouse_sufficient query=%s results=%d — skipping external providers",
                  req.query, len(warehouse_results))
         search_results = []
     else:
+        metrics.incr("aggregate.external_searches")
         search_results = await _multi_provider_search(req.query, req.max_results)
 
     # 2. Merge + domain-tag + deduplicate
@@ -484,20 +541,31 @@ async def cross_domain_aggregate(req: AggregateRequest):
     # 2.5 Optional: Scrape top results for full content
     scraped_content: list = []
     if req.enable_scraping and sources:
+        t_scrape = time.monotonic()
         scraped_content = await _scrape_sources(sources[:req.max_scrape_urls])
+        metrics.time("scrape.duration_ms", (time.monotonic() - t_scrape) * 1000)
+        metrics.incr("scrape.requests")
+        metrics.incr("scrape.urls", len(scraped_content))
         log.info("scraped urls=%d for query=%s", len(scraped_content), req.query)
 
     # 2.6 Optional: Embed → Retrieve via vector-store
     rag_chunks: list = []
     if req.enable_rag and scraped_content:
+        t_rag = time.monotonic()
         rag_chunks = await _rag_pipeline(req.query, scraped_content, req.rag_top_k)
+        metrics.time("rag.duration_ms", (time.monotonic() - t_rag) * 1000)
+        metrics.incr("rag.requests")
+        metrics.incr("rag.chunks_retrieved", len(rag_chunks))
         log.info("rag chunks=%d for query=%s", len(rag_chunks), req.query)
 
     # 3. Cross-domain reconciliation via LLM
     consensus = None
     synthesis = None
     if req.reconcile and len(sources) >= 2:
+        t_rec = time.monotonic()
         reconciliation = await _llm_reconcile(req.query, sources)
+        metrics.time("reconcile.duration_ms", (time.monotonic() - t_rec) * 1000)
+        metrics.incr("reconcile.requests")
         consensus_raw = reconciliation.get("consensus", [])
         consensus = [
             ConsensusFact(
@@ -511,6 +579,7 @@ async def cross_domain_aggregate(req: AggregateRequest):
         synthesis = reconciliation.get("synthesis")
 
     elapsed_ms = int((time.time() - t0) * 1000)
+    metrics.time("aggregate.duration_ms", elapsed_ms)
 
     log.info("aggregate query=%s domains=%d sources=%d consensus=%d time=%dms",
              req.query, len(domains_queried), len(sources),
@@ -642,6 +711,22 @@ async def health():
     return {"status": "ok" if all_ok else "degraded", "dependencies": deps}
 
 
+@app.get("/api/metrics")
+async def get_metrics():
+    """Service metrics — request counts, latencies, cache/warehouse hit rates."""
+    snap = metrics.snapshot()
+    # Add derived metrics
+    total = snap["counters"].get("aggregate.requests", 0)
+    cache_hits = snap["counters"].get("aggregate.cache_hits", 0)
+    wh_hits = snap["counters"].get("aggregate.warehouse_hits", 0)
+    snap["derived"] = {
+        "cache_hit_rate": round(cache_hits / total, 3) if total > 0 else 0,
+        "warehouse_hit_rate": round(wh_hits / total, 3) if total > 0 else 0,
+        "external_search_rate": round(1 - (wh_hits / total), 3) if total > 0 else 1.0,
+    }
+    return snap
+
+
 @app.get("/")
 async def root():
     return {
@@ -734,9 +819,9 @@ class IngestFeedResponse(BaseModel):
 
 @app.post("/api/ingest/feed", response_model=IngestFeedResponse)
 async def ingest_feed(req: IngestFeedRequest):
-    """Ingest an RSS/Atom feed — extract links, queue for crawling."""
+    """Ingest an RSS/Atom feed - extract links, queue for crawling."""
     import xml.etree.ElementTree as ET
-    
+
     # Fetch feed
     try:
         async with httpx.AsyncClient(timeout=req.timeout) as client:
@@ -748,17 +833,17 @@ async def ingest_feed(req: IngestFeedRequest):
             xml_text = resp.text
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Feed fetch failed: {str(e)}")
-    
+
     # Parse feed (RSS or Atom)
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as e:
         raise HTTPException(status_code=400, detail=f"Invalid XML: {str(e)}")
-    
+
     # Extract feed title
     feed_title = ""
     ns = {"atom": "http://www.w3.org/2005/Atom"}
-    
+
     # RSS 2.0
     channel = root.find("channel")
     if channel is not None:
@@ -780,16 +865,16 @@ async def ingest_feed(req: IngestFeedRequest):
                 href = link_el.get("href") or link_el.text
                 if href:
                     links.append(href.strip())
-    
+
     if not links:
         return IngestFeedResponse(
             feed_url=req.feed_url, feed_title=feed_title,
             items_found=0, urls_extracted=0, queued_for_crawl=0,
         )
-    
+
     # Queue for crawling (fire-and-forget to not block)
     asyncio.create_task(_crawl_feed_links(links))
-    
+
     log.info("feed_ingested url=%s title=%s links=%d", req.feed_url, feed_title, len(links))
     return IngestFeedResponse(
         feed_url=req.feed_url, feed_title=feed_title,
