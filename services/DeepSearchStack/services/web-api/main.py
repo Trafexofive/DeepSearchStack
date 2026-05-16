@@ -10,6 +10,7 @@ Endpoints:
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -20,6 +21,49 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+# Redis cache — optional, fails open if unreachable
+_REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+_redis = None
+_CACHE_TTL = int(os.environ.get("AGGREGATE_CACHE_TTL", "3600"))  # 1 hour
+_CACHE_PREFIX = "dss:aggregate:"
+
+async def _get_redis():
+    global _redis
+    if _redis is not None:
+        return _redis
+    try:
+        import redis.asyncio as aioredis
+        _redis = aioredis.from_url(_REDIS_URL, decode_responses=True, socket_connect_timeout=2)
+        await _redis.ping()
+        log.info("Redis cache connected: %s", _REDIS_URL)
+    except Exception as e:
+        log.warning("Redis unavailable — caching disabled: %s", e)
+        _redis = False
+    return _redis
+
+def _cache_key(query: str, max_results: int, include_warehouse: bool, reconcile: bool) -> str:
+    raw = f"{query}|{max_results}|{include_warehouse}|{reconcile}"
+    return _CACHE_PREFIX + hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+async def _cache_get(key: str) -> Optional[dict]:
+    r = await _get_redis()
+    if not r:
+        return None
+    try:
+        data = await r.get(key)
+        return json.loads(data) if data else None
+    except Exception:
+        return None
+
+async def _cache_set(key: str, data: dict):
+    r = await _get_redis()
+    if not r:
+        return
+    try:
+        await r.setex(key, _CACHE_TTL, json.dumps(data, default=str))
+    except Exception:
+        pass
 
 logging.basicConfig(
     level=logging.INFO,
@@ -222,7 +266,14 @@ async def cross_domain_aggregate(req: AggregateRequest):
     """
     Cross-domain aggregation — queries all search providers + warehouse,
     domain-tags results, optionally reconciles via LLM for source-of-truth extraction.
+    Results cached in Redis (1h TTL, keyed by query+params hash).
     """
+    # Check cache first
+    ck = _cache_key(req.query, req.max_results, req.include_warehouse, req.reconcile)
+    if cached := await _cache_get(ck):
+        log.info("aggregate_cache_hit query=%s", req.query)
+        return cached
+
     import time
     t0 = time.time()
 
@@ -282,7 +333,7 @@ async def cross_domain_aggregate(req: AggregateRequest):
              req.query, len(domains_queried), len(sources),
              len(consensus) if consensus else 0, elapsed_ms)
 
-    return AggregateResponse(
+    response = AggregateResponse(
         query=req.query,
         domains_queried=domains_queried,
         total_sources=len(sources),
@@ -291,6 +342,11 @@ async def cross_domain_aggregate(req: AggregateRequest):
         synthesis=synthesis,
         execution_time_ms=elapsed_ms,
     )
+
+    # Cache the result (fire-and-forget)
+    asyncio.create_task(_cache_set(ck, response.model_dump()))
+
+    return response
 
 
 @app.post("/api/search/stream")
