@@ -96,28 +96,32 @@ app = FastAPI(title="DeepSearch Web API", version="6.0.0")
 
 # ─── Helpers ───────────────────────────────────────────────
 
-# Provider tiers — working first, degraded last. Broken providers skipped.
+# Provider list — 7 verified-working, non-redundant providers across 7 domains.
+# Redundant providers removed: whoogle/duckduckgo (SearXNG covers Google+Bing+DDG),
+#   pubmed/crossref/internetarchive (lower priority, keep domain count lean).
+# IP-blocked from Docker: reddit (needs proxy).
 _AGGREGATE_PROVIDERS = [
-    # Tier 1: verified working, fast
-    "searxng", "wikipedia", "stackexchange", "hackernews", "github",
-    # Tier 2: working, slower
-    "yacy", "pubmed", "crossref", "internetarchive",
-    # Tier 3: degraded/broken — kept for diversity but may fail silently
-    "whoogle", "duckduckgo", "arxiv", "reddit",
+    "searxng",         # web (multi-engine: Google, Bing, DDG, etc.)
+    "wikipedia",       # encyclopedia
+    "stackexchange",    # q_and_a
+    "hackernews",       # social_news
+    "github",           # code
+    "arxiv",            # academic
+    "yacy",             # web (P2P, complementary results)
 ]
 
 async def _multi_provider_search(query: str, max_results: int) -> List[dict]:
     """Query ALL search providers via search-gateway with deadline."""
     try:
-        # 20s deadline — return whatever we have by then
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        # 12s deadline — return whatever we have by then
+        async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.post(
                 f"{SEARCH_GATEWAY_URL}/search",
                 json={
                     "query": query,
                     "providers": _AGGREGATE_PROVIDERS,
                     "max_results": max_results,
-                    "timeout": 18,
+                    "timeout": 10,
                 },
             )
             resp.raise_for_status()
@@ -182,7 +186,7 @@ async def _llm_reconcile(query: str, sources: List[SourceResult]) -> dict:
     """Use inference-gateway to reconcile cross-domain results."""
     try:
         prompt = _build_reconciliation_prompt(query, sources)
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{INFERENCE_GATEWAY_URL}/v1/chat/completions",
                 json={
@@ -302,7 +306,7 @@ async def stream_search(request: ClientSearchRequest):
                         "query": request.query,
                         "providers": _AGGREGATE_PROVIDERS,
                         "max_results": 10,
-                        "timeout": 18,
+                        "timeout": 10,
                     },
                 )
                 resp.raise_for_status()
