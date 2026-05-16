@@ -122,6 +122,7 @@ class SearchResult(BaseModel):
     snippet: str
     source_domain: Optional[str]
     ingested_at: str
+    word_count: int = 0
 
 
 class StatsResponse(BaseModel):
@@ -208,7 +209,7 @@ async def search(
             where = f"AND c.source_domain = '{domain.replace(chr(39), chr(39)+chr(39))}'"
 
         rows = conn.execute(f"""
-            SELECT c.id, c.url, c.title, c.source_domain, c.ingested_at,
+            SELECT c.id, c.url, c.title, c.source_domain, c.ingested_at, c.word_count,
                    snippet(content_fts, 1, '<b>', '</b>', '...', 40) as snippet
             FROM content_fts
             JOIN content c ON content_fts.rowid = c.id
@@ -221,6 +222,7 @@ async def search(
             SearchResult(
                 id=row["id"], url=row["url"], title=row["title"],
                 snippet=row["snippet"], source_domain=row["source_domain"],
+                word_count=row["word_count"],
                 ingested_at=datetime.fromtimestamp(row["ingested_at"], tz=timezone.utc).isoformat(),
             )
             for row in rows

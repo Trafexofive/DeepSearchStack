@@ -80,28 +80,33 @@ def render_list(entries: list[dict], selected: int, offset: int, height: int, se
     """Render the entry list view."""
     clear()
     cols, _ = get_terminal_size()
-    title = " DSS Warehouse Browser " if not search else f" Search: {search} "
+    cols = max(cols, 60)
+    title = " DSS Warehouse " if not search else f" Search: {search} "
     print(f"\033[1;37;44m{title:─<{cols}}\033[0m")
-    print(f"\033[2m  {'#':>4s}  {'Title':{cols-40}s}  {'Words':>6s}  {'Domain':<20s}\033[0m")
-    print("─" * cols)
 
     visible = min(len(entries) - offset, height - 5)
     for i in range(visible):
         idx = offset + i
         entry = entries[idx]
-        title = (entry.get('title') or 'Untitled')[:cols - 40]
-        domain = (entry.get('source_domain') or '?')[:20]
+        e_title = (entry.get('title') or 'Untitled').replace('\n', ' ')
+        domain = (entry.get('source_domain') or '?')[:18]
         words = entry.get('word_count', 0)
-        line = f"  {idx:>4d}  {title:{cols-40}s}  {words:>6d}  {domain:<20s}"
+        wid = str(idx)
+        # Format: #NNN │ Title... │ NNNNNw │ domain
+        title_width = cols - 30
+        line = f" {wid:>4s} {e_title[:title_width]:{title_width}s} {words:>6d}w {domain:>18s}"
         if idx == selected:
-            print(f"\033[7m{line}\033[0m")
+            print(f"\033[7m{line[:cols]}\033[0m")
         else:
-            print(line)
+            print(line[:cols])
+
+    # Fill remaining space
+    for _ in range(height - 5 - visible):
+        print()
 
     # Status bar
-    print("─" * cols)
     pct = f"{selected + 1}/{len(entries)}" if entries else "0/0"
-    status = f" {pct} │ j/k:move  Enter:view  /:search  r:refresh  q:quit "
+    status = f" {pct} | j/k:move Enter:view /:search r:refresh q:quit "
     print(f"\033[1;37;44m{status:<{cols}}\033[0m", end='', flush=True)
 
 
