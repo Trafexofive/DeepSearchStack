@@ -1,7 +1,8 @@
 """
-DeepSearch Service - Main API
-Powerful, configurable search → scrape → RAG → synthesis endpoint
+DeepSearch Service — DEPRECATED. Proxies to web-api:8014.
+Session management preserved.
 """
+import os
 import time
 import logging
 from contextlib import asynccontextmanager
@@ -70,10 +71,13 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title=config.get("service.name", "DeepSearch"),
-    version=config.get("service.version", "1.0.0"),
-    description="Powerful AI search engine with scraping, RAG, and synthesis",
+    version=config.get("service.version", "2.0.0"),
+    description="DeepSearch — DEPRECATED. Use web-api:8014/api/aggregate instead.",
     lifespan=lifespan
 )
+
+# Web-API URL for proxying
+WEB_API_URL = os.environ.get("WEB_API_URL", "http://web-api:8014")
 
 # CORS middleware
 app.add_middleware(
@@ -86,118 +90,82 @@ app.add_middleware(
 
 
 # ============================================================================
-# Core DeepSearch Endpoints
+# Core DeepSearch Endpoints — DEPRECATED (proxied to web-api aggregate)
 # ============================================================================
 
 @app.post("/deepsearch", response_class=StreamingResponse)
 async def deepsearch_endpoint(request: DeepSearchRequest):
-    """
-    Main DeepSearch endpoint - Execute full search pipeline with streaming
-    
-    Pipeline: Search → Scrape → Embed → Retrieve → Synthesize
-    
-    Returns streaming response with:
-    - Progress updates
-    - Synthesized content chunks
-    - Sources and metadata
-    """
-    async def stream_response():
-        """Stream DeepSearch results"""
-        try:
-            # Add to session if enabled
-            if request.session_id and storage:
-                user_message = SessionMessage(
-                    role="user",
-                    content=request.query
-                )
-                await storage.add_message(request.session_id, user_message)
-            
-            # Execute pipeline
-            async for chunk in engine.deep_search(request):
-                # Yield SSE format
-                yield f"data: {chunk.json()}\n\n"
-                
-                # Save assistant response to session
-                if request.session_id and storage and chunk.type == "complete":
-                    assistant_message = SessionMessage(
-                        role="assistant",
-                        content=chunk.data.get("answer", ""),
-                        metadata=chunk.data
-                    )
-                    await storage.add_message(request.session_id, assistant_message)
-        
-        except Exception as e:
-            logger.error(f"DeepSearch error: {e}", exc_info=True)
-            error_chunk = StreamChunk(
-                type="error",
-                data={"message": str(e)}
-            )
-            yield f"data: {error_chunk.json()}\n\n"
-    
-    return StreamingResponse(
-        stream_response(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
+    """DEPRECATED: proxied to web-api /api/search/stream."""
+    return await _proxy_stream(
+        f"{WEB_API_URL}/api/search/stream",
+        {"query": request.query, "llm_provider": request.llm_provider},
     )
 
 
 @app.post("/deepsearch/quick")
 async def quick_search(request: QuickSearchRequest):
-    """
-    Quick search endpoint - Non-streaming, simplified response
-    Good for CLI tools and scripts
-    """
-    full_request = DeepSearchRequest(
-        query=request.query,
-        max_results=request.max_results,
-        stream=False,
-        session_id=request.session_id
+    """DEPRECATED: proxied to web-api /api/aggregate (non-streaming)."""
+    return await _proxy_json(
+        f"{WEB_API_URL}/api/aggregate",
+        {
+            "query": request.query,
+            "max_results": request.max_results,
+            "reconcile": True,
+            "include_warehouse": True,
+        },
     )
-    
-    # Collect all chunks
-    answer_parts = []
-    final_data = None
-    
-    async for chunk in engine.deep_search(full_request):
-        if chunk.type == "content":
-            answer_parts.append(chunk.data.get("content", ""))
-        elif chunk.type == "complete":
-            final_data = chunk.data
-    
-    if final_data:
-        return final_data
-    else:
-        raise HTTPException(status_code=500, detail="Search failed")
 
 
 @app.post("/deepsearch/research")
 async def recursive_research(request: RecursiveResearchRequest):
-    """Recursive research — multi-iteration deep-dive (Local Deep Research pattern).
-
-    Iterates: search → scrape → analyze gaps → refine query → repeat.
-    Returns streaming SSE progress + final synthesis.
-    """
+    """DEPRECATED: proxied to web-api /api/aggregate with scraping+RAG."""
     if request.stream:
-        async def stream_generator():
-            async for chunk in engine.recursive_research(request):
-                yield f"data: {chunk.json()}\n\n"
-            yield "data: [DONE]\n\n"
-        return StreamingResponse(stream_generator(), media_type="text/event-stream")
-    else:
-        answer_parts = []
-        final_data = None
-        async for chunk in engine.recursive_research(request):
-            if chunk.type == "content":
-                answer_parts.append(chunk.data.get("content", ""))
-            elif chunk.type == "complete":
-                final_data = chunk.data
-        if final_data:
-            final_data["answer"] = "".join(answer_parts)
-            return final_data
-        raise HTTPException(status_code=500, detail="Research failed")
+        return await _proxy_stream(
+            f"{WEB_API_URL}/api/search/stream",
+            {"query": request.query, "llm_provider": getattr(request, 'llm_provider', None)},
+        )
+    return await _proxy_json(
+        f"{WEB_API_URL}/api/aggregate",
+        {
+            "query": request.query,
+            "max_results": request.max_results_per_iter or 10,
+            "reconcile": True,
+            "include_warehouse": True,
+            "enable_scraping": True,
+            "max_scrape_urls": min(request.max_scrape_per_iter or 5, 10),
+            "enable_rag": True,
+        },
+    )
+
+
+# ── Proxy helpers ──────────────────────────────────────────────
+
+async def _proxy_stream(target_url: str, payload: dict):
+    """Stream proxy to web-api."""
+    import httpx
+    async def generator():
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                async with client.stream("POST", target_url, json=payload) as resp:
+                    async for chunk in resp.aiter_bytes():
+                        yield chunk.decode()
+        except Exception as e:
+            logger.error(f"Proxy stream error: {e}")
+            yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
+    return StreamingResponse(generator(), media_type="text/event-stream")
+
+
+async def _proxy_json(target_url: str, payload: dict):
+    """JSON proxy to web-api."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(target_url, json=payload)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        logger.error(f"Proxy error: {e}")
+        raise HTTPException(status_code=502, detail=f"Web-API proxy failed: {str(e)}")
 
 
 # ============================================================================
