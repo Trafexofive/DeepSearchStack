@@ -142,11 +142,23 @@ services:
       - WEB_API_URL=http://dss-web-api:8014
       - INFERENCE_URL=http://inference_gateway:8005/v1/chat/completions
       - YT_LAB_DATA=/app/data
+      - HTTP_PROXY=http://proxy:8888
+      - HTTPS_PROXY=http://proxy:8888
+      - http_proxy=http://proxy:8888
+      - https_proxy=http://proxy:8888
     volumes:
       - ../services/yt-lab/volumes/data:/app/data
     networks:
       - substrate-net
       - bridge-net
+
+
+  proxy:
+    build: ../services/proxy
+    networks:
+      - bridge-net
+      - substrate-net
+    restart: unless-stopped
 
   # ─── Infrastructure ────────────────────────────────────────────────────────
 
