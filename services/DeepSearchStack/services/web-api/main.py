@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -158,6 +159,8 @@ class SourceResult(BaseModel):
     source: str
     domain: str
     confidence: float
+    summary: str = ""  # auto-generated for long descriptions
+    entities: list[str] = []  # extracted URLs, code blocks, headings
 
 class AggregateRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Research query")
@@ -174,8 +177,9 @@ class AggregateRequest(BaseModel):
 class ConsensusFact(BaseModel):
     claim: str
     confidence: float
-    supporting_sources: List[str]  # source names
+    supporting_sources: List[str]
     conflicting_sources: List[str]
+    quality: str = "probable"  # verified (≥0.80), probable (≥0.70), uncertain (<0.70)
 
 class AggregateResponse(BaseModel):
     query: str
@@ -461,6 +465,22 @@ def _extract_domain(url: str) -> str:
     return urlparse(url).netloc or "unknown"
 
 
+def _extract_entities(text: str) -> list[str]:
+    """Basic entity extraction — URLs, code blocks, headings."""
+    entities = []
+    # Extract URLs
+    urls = re.findall(r'https?://[^\s\)]+', text)
+    entities.extend(urls[:3])
+    # Extract code blocks
+    code_blocks = re.findall(r'```(\w+)?\n([^`]+)```', text)
+    for lang, code in code_blocks[:2]:
+        entities.append(f"code:{lang or 'plain'}:{code[:50].strip()}")
+    # Extract markdown headings
+    headings = re.findall(r'^#{1,3}\s+(.+)$', text, re.MULTILINE)
+    entities.extend(h[:60] for h in headings[:5])
+    return entities[:10]
+
+
 # ─── Reconciliation ────────────────────────────────────────
 
 
@@ -586,13 +606,23 @@ async def cross_domain_aggregate(req: AggregateRequest):
             continue
         seen_urls.add(url)
         src = r.get("source", "unknown")
+        desc = r.get("description", r.get("snippet", ""))
+        # Auto-summarize long descriptions
+        summary = ""
+        if len(desc) > 500:
+            sentences = desc.replace('\n', ' ').split('. ')
+            summary = '. '.join(sentences[:2]) + '.' if len(sentences) >= 2 else desc[:300]
+        # Basic entity extraction
+        entities = _extract_entities(r.get("title", "") + " " + desc)
         sources.append(SourceResult(
             title=r.get("title", ""),
             url=url,
-            description=r.get("description", r.get("snippet", "")),
+            description=desc,
             source=src,
             domain=_classify_domain(src),
             confidence=r.get("confidence", r.get("score", 0.5)),
+            summary=summary,
+            entities=entities,
         ))
 
     domains_queried = sorted(set(s.domain for s in sources))
@@ -632,8 +662,10 @@ async def cross_domain_aggregate(req: AggregateRequest):
                 confidence=f["confidence"],
                 supporting_sources=f.get("supporting_sources", []),
                 conflicting_sources=f.get("conflicting_sources", []),
+                quality="verified" if f["confidence"] >= 0.80 else ("probable" if f["confidence"] >= 0.70 else "uncertain"),
             )
             for f in consensus_raw
+            if f.get("claim")  # skip empty claims
         ]
         synthesis = reconciliation.get("synthesis")
 
