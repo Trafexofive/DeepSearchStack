@@ -8,7 +8,9 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -27,13 +29,54 @@ logging.basicConfig(
 )
 log = logging.getLogger("warehouse")
 
-app = FastAPI(title="Knowledge Warehouse", version="1.0.0")
+app = FastAPI(title="Knowledge Warehouse", version="2.0.0")
 
 
-# ─── Database ─────────────────────────────────────────────
+# ─── Database — single-writer pattern for concurrent safety ──
+_write_lock = threading.Lock()
+_write_conn: sqlite3.Connection | None = None
+
+def _get_write_conn() -> sqlite3.Connection:
+    """Get the single write connection (thread-safe, auto-reconnect)."""
+    global _write_conn
+    _write_lock.acquire()
+    try:
+        if _write_conn is None:
+            _write_conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+            _write_conn.execute("PRAGMA journal_mode=WAL")
+            _write_conn.execute("PRAGMA synchronous=NORMAL")
+            _write_conn.execute("PRAGMA busy_timeout=10000")
+            _write_conn.execute("PRAGMA cache_size=-8000")  # 8MB cache
+            log.info("write_connection_opened")
+        return _write_conn
+    except Exception:
+        _write_lock.release()
+        raise
+
+@contextmanager
+def write_txn():
+    """Context manager for write transactions. Auto-commits on success, rolls back on error."""
+    conn = _get_write_conn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _write_lock.release()
+
+def _read_conn() -> sqlite3.Connection:
+    """Get a read-only connection (safe without lock in WAL mode)."""
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("PRAGMA query_only=ON")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def _init_db():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    with write_txn() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS content (
@@ -154,7 +197,7 @@ async def ingest(req: IngestRequest):
     md = req.markdown[:MAX_CONTENT_LENGTH]
     content = (req.content or "")[:MAX_CONTENT_LENGTH]
 
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    with write_txn() as conn:
         existing = conn.execute(
             "SELECT id FROM content WHERE url_hash = ?", (url_hash,)
         ).fetchone()
@@ -169,7 +212,6 @@ async def ingest(req: IngestRequest):
                 req.language, req.word_count, time.time(),
                 json.dumps(req.tags), url_hash,
             ))
-            conn.commit()
             log.info("ingest_update url=%s id=%s", req.url[:100], existing[0])
             return IngestResponse(id=existing[0], url=req.url, ingested=True, cached=True)
 
@@ -182,7 +224,6 @@ async def ingest(req: IngestRequest):
             req.published, req.language, req.word_count, domain,
             time.time(), json.dumps(req.tags),
         ))
-        conn.commit()
         row_id = cursor.lastrowid
         log.info("ingest_new url=%s id=%s words=%d", req.url[:100], row_id, req.word_count)
         return IngestResponse(id=row_id, url=req.url, ingested=True)
@@ -191,8 +232,8 @@ async def ingest(req: IngestRequest):
 @app.get("/content/{item_id}", response_model=ContentItem)
 async def get_content(item_id: int):
     """Retrieve a single content item by ID."""
-    with sqlite3.connect(str(DB_PATH)) as conn:
-        conn.row_factory = sqlite3.Row
+    conn = _read_conn()
+    try:
         row = conn.execute("SELECT * FROM content WHERE id = ?", (item_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Content not found")
@@ -204,6 +245,8 @@ async def get_content(item_id: int):
             ingested_at=datetime.fromtimestamp(row["ingested_at"], tz=timezone.utc).isoformat(),
             tags=json.loads(row["tags"]),
         )
+    finally:
+        conn.close()
 
 
 @app.get("/search", response_model=list[SearchResult])
@@ -213,8 +256,8 @@ async def search(
     domain: Optional[str] = Query(None, description="Filter by domain"),
 ):
     """Full-text search across stored content."""
-    with sqlite3.connect(str(DB_PATH)) as conn:
-        conn.row_factory = sqlite3.Row
+    conn = _read_conn()
+    try:
         query = q.replace("'", "''")
         where = ""
         if domain:
@@ -239,6 +282,8 @@ async def search(
             )
             for row in rows
         ]
+    finally:
+        conn.close()
 
 
 @app.get("/list", response_model=list[ListResult])
@@ -259,8 +304,8 @@ async def list_entries(
         sort = "source_domain"  # column name matches
     direction = "DESC" if order == "desc" else "ASC"
 
-    with sqlite3.connect(str(DB_PATH)) as conn:
-        conn.row_factory = sqlite3.Row
+    conn = _read_conn()
+    try:
         where = []
         params = []
         if domain:
@@ -298,17 +343,22 @@ async def list_entries(
             }
             for row in rows
         ]
+    finally:
+        conn.close()
 
 
 @app.get("/stats", response_model=StatsResponse)
 async def stats():
     """Warehouse statistics."""
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    conn = _read_conn()
+    try:
         total = conn.execute("SELECT COUNT(*), COALESCE(SUM(word_count), 0) FROM content").fetchone()
         domains = conn.execute(
             "SELECT source_domain, COUNT(*) as cnt FROM content GROUP BY source_domain ORDER BY cnt DESC LIMIT 20"
         ).fetchall()
         db_size = DB_PATH.stat().st_size / (1024 * 1024) if DB_PATH.exists() else 0
+    finally:
+        conn.close()
 
     return StatsResponse(
         total_entries=total[0], total_words=total[1],
@@ -320,17 +370,19 @@ async def stats():
 @app.delete("/content/{item_id}")
 async def delete_content(item_id: int):
     """Delete a content item."""
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    with write_txn() as conn:
         conn.execute("DELETE FROM content WHERE id = ?", (item_id,))
-        conn.commit()
     return {"deleted": item_id}
 
 
 @app.get("/health")
 async def health():
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    conn = _read_conn()
+    try:
         total = conn.execute("SELECT COUNT(*) FROM content").fetchone()[0]
-    return {"status": "healthy", "total_entries": total, "version": "1.0.0"}
+    finally:
+        conn.close()
+    return {"status": "healthy", "total_entries": total, "version": "2.0.0"}
 
 
 @app.get("/")
