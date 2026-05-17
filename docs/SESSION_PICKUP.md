@@ -1,97 +1,49 @@
 # SESSION_PICKUP.md — Substrate State
 
-> Last updated: 2026-05-17 · Session: proxy stack + yt-lab + content pipeline
+> Last updated: 2026-05-17 · Session: reverse proxy consolidation
 
 ## Current Status
 
-**Everything healthy — 30/30 tests green, git clean.**
+**3 proxy ports, all services healthy.**
 
-### DSS (DeepSearchStack)
-- 7 services running (lean subset)
-- Warehouse: 13.6K entries, 240MB
-- SDK: 10/10 smoke test, 11 CLI commands
-- dss-enrich.py: quality scoring, entities, dedup
+### Running (via reverse proxies)
+- **Core** (:8080) — 11 services, nginx routes / → api_gateway, /inference/ → inference_gateway
+- **Site** (:8082) — Astro static, 21 pages
+- **DSS** (:8083) — 12 services, nginx routes /dss/{api,search,crawl,warehouse,vectors,agent,gateway}/
+- searxng (:8888) — external meta-search
 
-### Core
-- 11 services running + yt-lab + proxy-rotator
-- nginx on :8080 — routes /api/dss/*, /api/blog/*, /api/yt-lab/*
-- Blog generator: /topics, /generate/from-warehouse
-- Knowledge bridge: deepsearch→web-api migration complete
+### Ready (not running)
+- **light** (:8084) — DSS light stack
+- **test** (:8085) — DSS test stack
 
-### New Services (this session)
-- **yt-lab** (:8020) — YouTube automation, host networking
-  - Channel ingest, video summarize (3 styles), crossref, channel watcher
-  - yt-dlp in Docker, transcription interface abstracted
-- **proxy-rotator** (:8888 proxy, :8030 API) — free proxy aggregation
-  - 10 sources, 32 working pool, auto-rotates tinyproxy upstream
-  - Bundles tinyproxy in-container
-- **content pipeline** — dss-enrich.py
-  - Quality scoring (0-100), entity extraction, near-duplicate detection
+### Reverse Proxy Architecture (NEW — eb737de)
+- One nginx per stack. All internal service ports removed.
+- Docs: `docs/architecture/reverse-proxy.md`
+- Port-map updated: `docs/architecture/port-map.md`
 
-### Running Containers
-- DSS: warehouse, crawler, web-api, search-gateway, search-agent, postgres, redis
-- Core: nginx, api_gateway, inference_gateway, llm_gateway, blog_generator, event_bus, workflow_engine, knowledge_bridge, geo_audit, sub_mq, ingest, redis
-- New: yt-lab, proxy-rotator
-- External: searxng + redis
+## Quick Health
 
-## Ports
-
-| Port | Service | Access |
-|------|---------|--------|
-| 8080 | nginx → all | Gateway: /api/dss/*, /api/blog/*, /api/yt-lab/* |
-| 8009 | warehouse | Direct + proxy via :8080 |
-| 8014 | web-api | Direct + proxy via :8080 |
-| 8020 | yt-lab | Direct (host network) |
-| 8030 | proxy-rotator | API (internal) |
-| 8005 | inference | Direct (LLM) |
-| 8000 | crawler | Direct |
-
-## Key Endpoints
-
+```bash
+curl localhost:8080/health              # core nginx
+curl localhost:8080/inference/health    # inference through proxy
+curl localhost:8083/health              # dss nginx
+curl localhost:8083/dss/api/health      # web-api through proxy
+curl localhost:8082/                    # site
 ```
-# Gateway (single port)
-http://localhost:8080/health              # Core health (8 services)
-http://localhost:8080/api/dss/health      # DSS health
-http://localhost:8080/api/dss/ui          # Web UI
-http://localhost:8080/api/blog/topics     # Discover topics
-http://localhost:8080/api/yt-lab/health   # yt-lab health
-
-# Direct
-http://localhost:8014/ui                  # Web UI
-http://localhost:8020/health              # yt-lab
-http://localhost:8009/stats               # Warehouse stats
-http://localhost:8030/pool                # Proxy pool (internal)
-```
-
-## CLI Tools (services/DeepSearchStack/scripts/)
-
-| Script | Purpose |
-|--------|---------|
-| dss.py | 11 commands (list, content, facts, search, stream, etc.) |
-| dss-smoke.py | SDK smoke test (10/10) |
-| dss-enrich.py | Content quality + entities + dedup |
-| dss-yt.py | Host-side YouTube ingest (now superseded by yt-lab) |
-| dss-view.py | Vim-style warehouse browser |
-| dss-docs.py | Universal document ingestion (9 formats) |
-| dss-repo.py | Git repo source extraction |
-| dss-overnight.py | Batch awesome-list crawl |
-| dss-backup.py | Warehouse nightly backup |
-| dss-cleanup.py | Garbage content removal |
-
-## Documented
-
-- ✅ port-map.md — full service topology
-- ✅ services/proxy.md — proxy architecture
-- ✅ services/web-api.md — endpoint catalog
-- ✅ services/knowledge-bridge.md — core↔DSS bridge
-- ✅ yt-lab/README.md — YouTube service
-- ✅ proxy-rotator/README.md — proxy rotation
 
 ## Git
-- 20+ clean commits on main
-- No dirty files
+- Latest: `eb737de feat: reverse proxy consolidation — one port per stack`
+- Pushed to origin/main
+- Dirty: `services/proxy-rotator/data/proxy-pool.json` (runtime data — not committed)
 
-## Known Issues
-- DSS crawler (crawl4ai) does not respect HTTP_PROXY — Reddit still blocked
-- YouTube ingest requires host networking (blocked from Docker NAT)
-- Warehouse FTS5 chokes on parens in search queries
+## Files Changed This Session
+| File | Change |
+|---|---|
+| `infra/docker-compose.core.yml` | Removed inference_gateway port exposure |
+| `infra/nginx/nginx.conf` | Added /inference/ route + /health |
+| `services/DeepSearchStack/infra/docker-compose.dss.yml` | Added nginx, stripped 7 ports |
+| `services/DeepSearchStack/infra/docker-compose.light.yml` | Added nginx, stripped 3 ports |
+| `services/DeepSearchStack/infra/docker-compose.test.yml` | Added nginx, stripped 4 ports |
+| `services/DeepSearchStack/infra/nginx/nginx.conf` | NEW — DSS reverse proxy config |
+| `docs/architecture/reverse-proxy.md` | NEW — architecture doc |
+| `docs/architecture/port-map.md` | Updated for proxy-only exposure |
