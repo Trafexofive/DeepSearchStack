@@ -1,62 +1,66 @@
 # Service Port Registry
 
+> Updated: 2026-05-17 · Session: DSS POC→production, core reboot
+
 ## Port Philosophy
 Only the edge gateway (nginx) is exposed to the host. All internal services communicate via Docker DNS on their internal networks. No direct host port access to internal services — requests route through nginx → api_gateway.
 
-## Core Stack (`substrate-core_`)
+## Core Stack (`infra_` Docker network)
 
-| Service | Internal Port | Host Port | Network | Status | Notes |
-|---|---|---|---|---|---|
-| `nginx` | 80 | **80** | substrate-net | **✅ live** | Edge gateway — single entry point |
-| `api_gateway` | 8000 | — | substrate-net | **✅ live** | 9-service reverse proxy, aggregate health |
-| `workflow_engine` | 8001 | — | substrate-net | **✅ live** | networkx DAG executor, 5-step pipeline |
-| `llm_gateway` | 8002 | — | substrate-net | **✅ live** | Ollama/Groq router |
-| `event_bus` | 8003 | — | substrate-net | **✅ live** | Redis pub/sub + WebSocket, 30+ events |
-| `inference_gateway` | 8005 | — | substrate-net | **✅ live** | DeepSeek v4-flash, 2 models |
-| `blog_generator` | 8006 | — | substrate-net | **✅ live** | AI blog gen + SQLite tracker, 17 gens |
-| `ingest` | 8008 | — | substrate-net | **✅ live** | RSS/Atom feed polling → blog gen, 4 drafts |
-| `knowledge-bridge` | 8010 | — | substrate-net | **✅ live** | DSS research → blog gen bridge |
-| `geo-audit` | 8011 | — | substrate-net | **✅ live** | AI-SEO/GEO content scorer |
-| `sub-mq` | 8012 | — | substrate-net | **✅ live** | Sub-agent message queue (Redis-backed) |
-| `redis` | 6379 | — | substrate-net | infra | Redis 7 Alpine |
+| Service | Internal Port | Status | Notes |
+|---|---|---|---|
+| `nginx` | 80 | ⚠ port conflict | Edge gateway — needs host port 80 fix |
+| `api_gateway` | 8000 | ✅ running | Route orchestration |
+| `workflow_engine` | 8001 | ✅ running | Workflow execution |
+| `llm_gateway` | 8002 | ✅ running | LLM provider abstraction |
+| `event_bus` | 8003 | ✅ running | Redis-backed messaging |
+| `inference_gateway` | 8005 | ✅ running | DeepSeek API (openai-compat) |
+| `blog_generator` | 8006 | ✅ running | Content generation + research |
+| `ingest` | 8008 | ✅ running | Feed ingestion |
+| `knowledge_bridge` | 8010 | ✅ running | Core→DSS bridge |
+| `geo_audit` | 8011 | ✅ running | Location-aware content audit |
+| `sub_mq` | 8012 | ✅ running | Message queue |
+| `redis` | 6379 | ✅ running | Cache and event bus backend |
 
-## DSS Stack (`substrate-dss_`)
+## DSS Stack (`infra_` Docker network)
 
-| Service | Internal Port | Host Port | Network | Status | Notes |
-|---|---|---|---|---|---|
-| `deepsearch` | 8001 | 8001 | deepsearch_net, bridge-net | **✅ live** | 5-stage research pipeline |
-| `search-gateway` | 8002 | 8002 | deepsearch_net | **✅ live** | Multi-provider search aggregator |
-| `crawler` | 8000 | 8000 | deepsearch_net | **✅ live** | crawl4ai + SQLite cache v2 |
-| `vector-store` | 8004 | 8004 | deepsearch_net | **✅ live** | ChromaDB persistent RAG |
-| `knowledge-warehouse` | 8009 | 8009 | deepsearch_net | **✅ live** | SQLite FTS5 content store |
-| `searxng` | 8080 | — | deepsearch_net | **✅ live** | 14-engine meta search |
-| `whoogle` | 5000 | — | deepsearch_net | ✅ live | Google proxy (unreliable) |
-| `postgres` | 5432 | — | deepsearch_net | **✅ live** | Internal DB |
+| Service | Internal Port | Host Port | Status | Notes |
+|---|---|---|---|---|
+| `*_warehouse` | 8009 | 8009 | ✅ healthy | SQLite FTS5, 13.6K entries |
+| `crawler` | 8000 | 8000 | ✅ healthy | crawl4ai + retry queue |
+| `web-api` | 8014 | 8014 | ✅ healthy | Aggregate + proxies + /ui |
+| `search-gateway` | 8002 | 8002 | ✅ healthy | Provider routing |
+| `search-agent` | 8013 | 8013 | ✅ healthy | LLM synthesis |
+| `postgres` | 5432 | 5432 | ✅ healthy | DSS database |
+| `redis` | 6379 | 6379 | ✅ healthy | Aggregate cache |
 
-## How to check
+### Stopped (not needed for ingest/search)
+| Service | Port | Reason |
+|---|---|---|
+| `deepsearch` | 8001 | Deprecated — proxied to web-api |
+| `vector-store` | 8004 | Stopped — in-memory, restart-reset |
+| `searxng` | 8888 | Stopped — not needed for warehouse-only flow |
+| `whoogle` | 5000 | Stopped |
+| `yacy` | 8090 | Stopped |
 
-```bash
-# Core stack health
-curl localhost:8005/health   # inference_gateway
-curl localhost:8006/health   # blog_generator
-curl localhost:8003/health   # event_bus
+## Cross-Stack Connectivity
 
-# DSS stack health
-curl localhost:8001/health   # deepsearch
-curl localhost:8004/health   # vector-store
-curl localhost:8009/health   # knowledge-warehouse
+DSS and Core share the `infra_substrate-net` bridge network. Key connections:
 
-# Dashboard
-make list-stacks
-make list-services core
-make list-services dss
+```
+blog_generator → web-api:8014    (research via aggregate)
+blog_generator → warehouse:8009  (context search)
+knowledge_bridge → web-api:8014  (DSS queries from core)
+inference_gateway ← web-api:8014  (LLM reconciliation)
 ```
 
-## Adding a new port
+## Host-Accessible Ports (for dev + phone access)
 
-1. Choose next available port (currently 8013+ for core, 8010+ for new)
-2. Decide which stack the service belongs to
-3. Create `services/{name}/docker-compose.yml`
-4. Add service to the appropriate compose file
-5. Add entry in `settings.yml` under `services:`
-6. Update this file
+| Port | Service | Access |
+|---|---|---|
+| 8009 | Warehouse | `curl localhost:8009/stats` |
+| 8014 | Web API | `http://localhost:8014/ui` |
+| 8000 | Crawler | `curl localhost:8000/health` |
+| 8002 | Search Gateway | `curl localhost:8002/health` |
+| 8013 | Search Agent | `curl localhost:8013/health` |
+| 5432 | Postgres | DSS database |
