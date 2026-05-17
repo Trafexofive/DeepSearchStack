@@ -62,6 +62,7 @@ services:
     build: ../services/blog_generator
     environment:
       - BLOG_GENERATOR_PORT=8006
+      - WAREHOUSE_URL=http://dss-knowledge-warehouse:8009
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - TRACKER_DB=/app/data/tracker.db
     depends_on:
