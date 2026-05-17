@@ -26,6 +26,7 @@ logging.basicConfig(
 log = logging.getLogger("bridge")
 
 DEEPSEARCH_URL = os.environ.get("DEEPSEARCH_URL", "http://dss-deepsearch:8001")
+WEB_API_URL = os.environ.get("WEB_API_URL", "http://dss-web-api:8014")
 WAREHOUSE_URL = os.environ.get("WAREHOUSE_URL", "http://dss-knowledge-warehouse:8009")
 CRAWLER_URL = os.environ.get("CRAWLER_URL", "http://dss-crawler:8000")
 BLOG_GENERATOR_URL = os.environ.get("BLOG_GENERATOR_URL", "http://blog_generator:8006")
@@ -306,12 +307,12 @@ async def health():
     deps_ok = True
     deps = {}
     for name, url in [
-        ("deepsearch", DEEPSEARCH_URL),
+        ("web_api", WEB_API_URL),
         ("warehouse", WAREHOUSE_URL),
         ("blog_generator", BLOG_GENERATOR_URL),
     ]:
         try:
-            r = await http_client.get(f"{url}/health", timeout=5.0)
+            r = await http_client.get(f"{url}/health", timeout=3.0)
             deps[name] = "ok" if r.status_code == 200 else "degraded"
         except Exception:
             deps[name] = "unreachable"

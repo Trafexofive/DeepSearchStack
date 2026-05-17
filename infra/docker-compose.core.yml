@@ -90,6 +90,7 @@ services:
     environment:
       - BRIDGE_PORT=8010
       - DEEPSEARCH_URL=http://dss-deepsearch:8001
+      - WEB_API_URL=http://dss-web-api:8014
       - WAREHOUSE_URL=http://dss-knowledge-warehouse:8009
       - CRAWLER_URL=http://dss-crawler:8000
       - BLOG_GENERATOR_URL=http://blog_generator:8006
