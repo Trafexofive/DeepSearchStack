@@ -4,7 +4,7 @@ date: 2026-05-13
 modified: 2026-05-13
 category: "research"
 tags: ['transformers', 'attention', 'flash-attention', 'deep-learning']
-excerpt: "Auto-generated researched technical article — reviewed before publish."
+excerpt: "A technical walkthrough of attention from scaled dot‑product to flash attention, explaining its quadratic scaling bottleneck and modern fixes with code examples."
 generated: true
 model: "deepseek-v4-flash"
 cost_usd: 0.001922
@@ -13,6 +13,18 @@ sources:
   - Transformer (deep learning): https://en.wikipedia.org/wiki/Transformer_(deep_learning)
   - 2000s: https://en.wikipedia.org/wiki/2000s
   - Zero-point energy: https://en.wikipedia.org/wiki/Zero-point_energy
+
+faq:
+  - question: "What is scaled dot-product attention in transformers?"
+    answer: "It is the core attention mechanism computing a weighted sum of Values based on Query-Key compatibility. Given matrices Q, K, V, it computes softmax(QK^T / sqrt(d_k))V. The scaling factor prevents large dot products from pushing softmax into low-gradient regions, stabilizing training."
+  - question: "Why does vanilla attention scale quadratically with sequence length?"
+    answer: "The attention matrix (QK^T) has dimensions n x n, where n is sequence length. Computing this matrix requires O(n^2) time and memory. For long sequences (genomics, long documents), this quadratic complexity becomes prohibitive, motivating efficient alternatives like Flash Attention."
+  - question: "How does flash attention reduce computational costs?"
+    answer: "Flash Attention optimizes memory bandwidth by tiling the attention computation across GPU high-bandwidth memory, avoiding materializing the full n x n attention matrix. It computes attention in blocks, reducing memory usage from O(n^2) to linear in n while maintaining exact softmax via online rescaling."
+  - question: "What is the role of the scaling factor 1/sqrt(d_k) in attention?"
+    answer: "Without scaling, for large key dimension d_k, dot products can become very large in magnitude. This pushes softmax into regions with extremely small gradients, hindering training. Dividing by sqrt(d_k) adjusts variance to approximately one, keeping gradients healthy for learning."
+  - question: "How does multi-head attention differ from single-head attention?"
+    answer: "Multi-head attention projects Q, K, V into h lower-dimensional subspaces (heads), computes scaled dot-product attention in each head in parallel, then concatenates and linearly projects results. This allows the model to attend to information from different representation subspaces at different positions."
 ---
 
 # Attention Mechanisms in Transformers: From Scaled Dot-Product to Flash Attention and Beyond

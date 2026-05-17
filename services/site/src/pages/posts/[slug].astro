@@ -1,6 +1,6 @@
 ---
 import Base from "../../layouts/Base.astro";
-import { SITE } from "../../site.config";
+import { SITE, AUTHOR } from "../../site.config";
 
 export async function getStaticPaths() {
   const modules = import.meta.glob("/src/content/posts/*.mdx", { eager: true });
@@ -16,25 +16,35 @@ export async function getStaticPaths() {
 const { slug, frontmatter, Content } = Astro.props;
 const date = new Date(frontmatter.date);
 const dateISO = date.toISOString();
+const authorName = frontmatter.author ?? AUTHOR.name;
+
+// Build HowTo schema if this is a guide with steps in frontmatter
+const howto = frontmatter.howto ?? undefined;
+
+// Build FAQ from frontmatter if present
+const faq = frontmatter.faq ?? undefined;
 ---
 
 <Base
   title={frontmatter.title}
-  description={frontmatter.excerpt ?? ""}
+  description={frontmatter.excerpt ?? AUTHOR.description}
   type="article"
   canonicalURL={`${SITE.url}/posts/${slug}/`}
   publishedTime={dateISO}
   modifiedTime={frontmatter.modified ? new Date(frontmatter.modified).toISOString() : dateISO}
-  authorName={frontmatter.author ?? "Substrate"}
+  authorName={authorName}
+  authorUrl={AUTHOR.url}
   tags={[frontmatter.category, ...(frontmatter.tags || [])]}
+  faq={faq}
+  howto={howto}
 >
   <article>
     <header class="article-header">
       <div class="article-meta">
         <a href={`/${frontmatter.category === "guide" ? "guides" : frontmatter.category + "s"}`} class="chip chip-category">{frontmatter.category}</a>
         <time datetime={dateISO}>{dateISO.slice(0, 10)}</time>
-        {frontmatter.author && frontmatter.author !== "Substrate" && ` · by ${frontmatter.author}`}
-        {frontmatter.modified && ` · updated ${new Date(frontmatter.modified).toISOString().slice(0, 10)}`}
+        {` · by ${authorName}`}
+        {frontmatter.modified && frontmatter.modified !== frontmatter.date && ` · updated ${new Date(frontmatter.modified).toISOString().slice(0, 10)}`}
       </div>
 
       <h1 class="article-title">{frontmatter.title}</h1>
@@ -49,6 +59,19 @@ const dateISO = date.toISOString();
     <div class="article-body">
       <Content />
     </div>
+
+    <!-- FAQ section -->
+    {faq && faq.length > 0 && (
+      <section style="margin-top:var(--space-7);padding-top:var(--space-5);border-top:1px solid var(--border)">
+        <h2 id="faq">Frequently Asked Questions</h2>
+        {faq.map((q, i) => (
+          <details style="margin-bottom:var(--space-3)">
+            <summary style="font-weight:600;cursor:pointer;margin-bottom:var(--space-2)">{q.question}</summary>
+            <p style="color:var(--text-secondary);margin-left:var(--space-5)">{q.answer}</p>
+          </details>
+        ))}
+      </section>
+    )}
   </article>
 
   <hr />

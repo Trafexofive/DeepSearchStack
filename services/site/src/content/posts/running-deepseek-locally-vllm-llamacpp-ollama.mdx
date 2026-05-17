@@ -4,13 +4,25 @@ date: 2026-05-13
 modified: 2026-05-13
 category: "guide"
 tags: ['deepseek', 'local-ai', 'vllm', 'llama.cpp', 'self-hosted']
-excerpt: "Auto-generated researched technical article — reviewed before publish."
+excerpt: "Benchmarking vLLM, llama.cpp, and Ollama for self-hosted DeepSeek inference — throughput, memory, and setup complexity compared."
 generated: true
 model: "deepseek-v4-flash"
 cost_usd: 0.001765
 tokens: 1816
 sources:
 
+
+faq:
+  - question: "What are the main differences between vLLM, llama.cpp, and Ollama for running DeepSeek models locally?"
+    answer: "vLLM optimizes throughput and memory using PagedAttention, ideal for production GPU serving. llama.cpp targets consumer hardware with CPU-first design and GGUF format. Ollama provides a user-friendly interface that abstracts underlying engines, typically using llama.cpp on CPU or supporting GPU acceleration, simplifying deployment for beginners."
+  - question: "Which framework offers the highest throughput for serving DeepSeek models in production?"
+    answer: "vLLM delivers the highest throughput for production serving, especially under concurrent requests. Its continuous batching and PagedAttention achieve 2-4x higher throughput than baseline Hugging Face Transformers for batch sizes over 4. It requires a CUDA-capable GPU and is best for high-concurrency API endpoints."
+  - question: "Can I run DeepSeek models on CPU-only hardware? Which framework is best suited?"
+    answer: "Yes, llama.cpp is the best choice for CPU-only inference. It is a pure C/C++ framework optimized for x86 and ARM CPUs, supporting GGUF quantization to reduce memory. It can run 7B parameter models on systems with sufficient RAM, though slower than GPU setups. Ollama can also leverage CPU under the hood."
+  - question: "What is the recommended framework for beginners wanting to run DeepSeek models locally with minimal setup?"
+    answer: "Ollama is the recommended framework for beginners due to its simple command-line interface and automatic model download. It abstracts complex configuration steps and can run on both CPU and GPU. By default, it uses llama.cpp on macOS and Linux, making local inference accessible with just one command."
+  - question: "How do these frameworks handle model quantization to reduce memory usage?"
+    answer: "vLLM supports FP16, INT8, and INT4 via AWQ/GPTQ quantization, fitting 13B models on 12GB GPUs. llama.cpp uses GGUF format with various quantization levels (e.g., Q4_0, Q5_K_M) for CPU-friendly memory reduction. Ollama defaults to 4-bit quantization using llama.cpp’s Q4_K_M, balancing quality and resource use."
 ---
 
 # Running DeepSeek Models Locally: vLLM vs llama.cpp vs Ollama for Self-Hosted Inference

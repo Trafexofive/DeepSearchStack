@@ -5,6 +5,16 @@ modified: 2026-05-12
 category: "news"
 tags: ["deepseek", "reasoning", "open-source", "llm"]
 excerpt: "DeepSeek released R1 — a 671B Mixture-of-Experts reasoning model with open weights. Here's what makes it special and why it matters for FOSS AI."
+
+faq:
+  - question: "What is DeepSeek R1?"
+    answer: "DeepSeek R1 is a 671-billion-parameter Mixture-of-Experts reasoning model released in January 2025 under the MIT license. It uses only 37 billion active parameters per token, making inference efficient. It's the first large-scale open-weight reasoning model, freely available for use, modification, and commercial distribution."
+  - question: "How does DeepSeek R1 work?"
+    answer: "DeepSeek R1 generates an internal reasoning trace before producing its final answer, visible as `reasoning_content` in API responses. It was trained with reinforcement learning on reasoning traces first, without supervised fine-tuning. This RL-first approach produces chain-of-thought reasoning, allowing the model to think for hundreds of tokens before answering."
+  - question: "Why does DeepSeek R1 matter?"
+    answer: "DeepSeek R1 matters because it's the first open-weight reasoning model with an MIT license, enabling unrestricted commercial use and self-hosting. Distilled variants run on consumer hardware and outperform proprietary models like GPT-4o on reasoning benchmarks. This democratizes advanced AI reasoning for researchers, developers, and businesses worldwide."
+  - question: "How does DeepSeek R1 compare to GPT-4o?"
+    answer: "DeepSeek R1 significantly outperforms GPT-4o on STEM reasoning benchmarks: 97.3% vs 76.6% on MATH-500, and 79.8% vs 9.3% on AIME 2024. While GPT-4o is a proprietary model, DeepSeek R1 is open-weight and MIT-licensed. Its distilled 32B variant runs on consumer hardware and still beats GPT-4o on several tasks."
 ---
 
 DeepSeek released R1 in January 2025 — a 671B-parameter Mixture-of-Experts

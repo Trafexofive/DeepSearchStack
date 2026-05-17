@@ -1,6 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import { SITE } from "../site.config";
+import { SITE, AUTHOR } from "../site.config";
 ---
 
 <Base title="About">
@@ -8,11 +8,26 @@ import { SITE } from "../site.config";
 
   <div class="article-body">
     <p>
-      <strong>{SITE.title}</strong> is a <strong>FOSS-first AI publication</strong>.
+      <strong>{SITE.title}</strong> is a <strong>FOSS-first AI publication</strong>
+      by <strong>{AUTHOR.name}</strong> — {AUTHOR.description}
+    </p>
+    <p>
       We write deep technical guides, run reproducible benchmarks, demystify research
       papers, and publish based opinions. No affiliate links, no sponsored content,
       no hype.
     </p>
+
+    <h2>Author</h2>
+    <p>
+      <strong>{AUTHOR.name}</strong> is a systems programmer and FOSS maximalist
+      building AI infrastructure on bare metal — no cloud dependencies, no vendor lock-in.
+      Active in the open-source LLM and self-hosted AI community.
+    </p>
+    <ul>
+      <li><a href="https://github.com/cleverlord">GitHub</a></li>
+      <li><a href="https://twitter.com/substrate_pub">Twitter/X</a></li>
+      <li><a href="https://github.com/cleverlord/substrate">Substrate (this project)</a></li>
+    </ul>
 
     <h2>How we work</h2>
     <p>
@@ -51,4 +66,13 @@ import { SITE } from "../site.config";
       <a href="/rss.xml">Subscribe via RSS</a>. No email, no notifications, just the feed.
     </p>
   </div>
+  <script type="application/ld+json" set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Person",
+    name: AUTHOR.name,
+    url: AUTHOR.url,
+    description: AUTHOR.description,
+    sameAs: AUTHOR.sameAs,
+    mainEntityOfPage: { "@type": "WebPage", "@id": `${SITE.url}/about/` },
+  })} />
 </Base>

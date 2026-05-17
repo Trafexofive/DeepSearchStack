@@ -1,5 +1,5 @@
 ---
-import { SITE } from "../site.config";
+import { SITE, AUTHOR } from "../site.config";
 import "../styles/global.css";
 
 export interface Props {
@@ -10,8 +10,16 @@ export interface Props {
   publishedTime?: string;
   modifiedTime?: string;
   authorName?: string;
+  authorUrl?: string;
   tags?: string[];
   ogImage?: string;
+  faq?: { question: string; answer: string }[];
+  howto?: {
+    name: string;
+    description?: string;
+    steps: { name: string; text: string; image?: string }[];
+    totalTime?: string;
+  };
 }
 
 const {
@@ -21,9 +29,12 @@ const {
   canonicalURL,
   publishedTime,
   modifiedTime,
-  authorName = "Substrate",
+  authorName = AUTHOR.name,
+  authorUrl = AUTHOR.url,
   tags = [],
   ogImage = "/favicon.svg",
+  faq,
+  howto,
 } = Astro.props;
 
 const pageTitle = title ? `${title} :: ${SITE.title}` : SITE.title;
@@ -70,7 +81,9 @@ const url = canonicalURL ?? `${SITE.url}${Astro.url.pathname}`;
       author: {
         "@type": "Person",
         name: authorName,
-        url: `${SITE.url}/about`,
+        url: authorUrl,
+        description: AUTHOR.description,
+        sameAs: AUTHOR.sameAs,
       },
       publisher: {
         "@type": "Organization",
@@ -81,6 +94,40 @@ const url = canonicalURL ?? `${SITE.url}${Astro.url.pathname}`;
       keywords: tags.join(", "),
       mainEntityOfPage: { "@type": "WebPage", "@id": url },
       isAccessibleForFree: true,
+    })} />
+  )}
+
+  <!-- FAQPage schema (article pages with FAQ) -->
+  {type === "article" && faq && faq.length > 0 && (
+    <script type="application/ld+json" set:html={JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: faq.map((q) => ({
+        "@type": "Question",
+        name: q.question,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: q.answer,
+        },
+      })),
+    })} />
+  )}
+
+  <!-- HowTo schema (guide posts) -->
+  {type === "article" && howto && (
+    <script type="application/ld+json" set:html={JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      name: howto.name,
+      description: howto.description ?? description,
+      ...(howto.totalTime ? { totalTime: howto.totalTime } : {}),
+      step: howto.steps.map((s, i) => ({
+        "@type": "HowToStep",
+        position: i + 1,
+        name: s.name,
+        text: s.text,
+        ...(s.image ? { image: s.image } : {}),
+      })),
     })} />
   )}
 
@@ -95,6 +142,7 @@ const url = canonicalURL ?? `${SITE.url}${Astro.url.pathname}`;
       logo: `${SITE.url}/favicon.svg`,
       sameAs: [
         "https://github.com/cleverlord/substrate",
+        "https://github.com/cleverlord",
       ],
     })} />
   )}

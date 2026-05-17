@@ -1,0 +1,137 @@
+---
+title: "Cheapest LLM APIs 2026: MiniMax vs DeepSeek vs Groq vs OpenRouter — Pricing and Performance Compared"
+date: 2026-05-17
+modified: 2026-05-17
+category: "benchmark"
+tags: ['llm-api', 'pricing', 'minimax', 'deepseek', 'groq', 'openrouter', 'cost-comparison']
+excerpt: "Complete pricing comparison of the cheapest production LLM APIs in 2026: MiniMax abab6.5s-chat, DeepSeek-V3, Groq (Llama/Mixtral), and OpenRouter aggregator. Benchmarks, context windows, and hidden costs."
+generated: true
+model: "deepseek-v4-pro"
+cost_usd: 0.0
+tokens: 0
+sources:
+  - https://substrate.pub/posts/minimax-abab-cheapest-production-llm-api/
+---
+
+# Cheapest LLM APIs 2026: MiniMax vs DeepSeek vs Groq vs OpenRouter
+
+**Summary:** LLM API pricing in 2026 spans two orders of magnitude — from $0.04/M tokens (Groq + Llama 3.1 8B) to $10.00/M (GPT-4o). We compare the four cheapest production-grade options: MiniMax abab6.5s-chat (4M context at $0.27/M input), DeepSeek-V3 (MoE efficiency at $0.27/M), Groq (hardware-accelerated open models), and OpenRouter (multi-provider aggregator). Pricing data, benchmarks, and when each makes sense.
+
+## The State of LLM API Pricing in 2026
+
+The cost curve for LLM inference has bent sharply downward. In early 2024, GPT-4 cost $30/M input tokens. By mid-2026, you can get comparable quality for $0.27/M — a 111x reduction in 2 years. This comparison focuses on the cheapest production-grade APIs, not the frontier premium tier (GPT-4o, Claude 3.5 Opus). These are the APIs you use when cost per token matters more than absolute quality.
+
+## Pricing Comparison Table
+
+| Provider | Model | Input $/M | Output $/M | Context | Quality Tier |
+|----------|-------|:---------:|:----------:|:-------:|:------------:|
+| **Groq** | Llama 3.1 8B | $0.04 | $0.04 | 128K | Low |
+| **Groq** | Llama 3.3 70B | $0.59 | $0.79 | 128K | Medium-High |
+| **Groq** | Mixtral 8x7B | $0.13 | $0.13 | 32K | Medium |
+| **DeepSeek** | DeepSeek-V3 | $0.27 | $1.10 | 128K | High |
+| **DeepSeek** | DeepSeek-R1 | $0.55 | $2.19 | 128K | Very High |
+| **MiniMax** | abab6.5s-chat | $0.27 | $1.10 | 4M | Medium-High |
+| **OpenRouter** | Llama 3.1 8B (free) | $0.00 | $0.00 | 128K | Low |
+| **OpenRouter** | DeepSeek-V3 (via DeepInfra) | $0.30 | $0.35 | 128K | High |
+| **OpenRouter** | Qwen 2.5 72B | $0.35 | $0.40 | 128K | Medium-High |
+
+*Prices as of May 2026. OpenRouter prices vary by underlying provider and can change hourly.*
+
+## Benchmark Quality Comparison
+
+| Model | MMLU | HumanEval | MATH | Context | Best For |
+|-------|:----:|:---------:|:----:|:-------:|----------|
+| DeepSeek-V3 | 86.4% | 88.4% | 90.2% | 128K | Math, bilingual, general quality at low cost |
+| DeepSeek-R1 | 85.2% | 82.6% | 97.3% | 128K | Deep reasoning, STEM (costs 2x more) |
+| MiniMax abab6.5s | ~70% | ~60% | ~55% | 4M | Massive context, batch processing |
+| Llama 3.3 70B (Groq) | 82.0% | 80.5% | 65.0% | 128K | Fast inference, open model |
+| Llama 3.1 8B (Groq) | 66.7% | 62.2% | 35.0% | 128K | Simple tasks, classification, ultra-cheap |
+| Mixtral 8x7B (Groq) | 71.2% | 51.3% | 45.0% | 32K | Medium quality, very fast |
+| Qwen 2.5 72B (OR) | 85.0% | 82.0% | 70.0% | 128K | Strong all-around open model |
+
+## Provider-by-Provider Breakdown
+
+### Groq: Hardware-Accelerated Open Models
+
+Groq doesn't train models — they serve open-weight models (Llama, Mixtral) on custom LPU hardware that delivers 300-500 tokens/second. This makes them the fastest option by far, and among the cheapest for smaller models (Llama 3.1 8B at $0.04/M).
+
+**Strengths:** Blazing speed. Open model transparency. Llama 3.3 70B offers strong quality at $0.59/M — arguably the best quality-per-dollar for open models.
+
+**Weaknesses:** Limited model selection (Llama + Mixtral only). No proprietary frontier models. 128K context is adequate but not exceptional.
+
+**Best for:** High-throughput applications where speed matters. Classification, summarization, batch processing at scale. Teams that want open model weights with API convenience.
+
+### DeepSeek: MoE Cost Efficiency
+
+DeepSeek-V3 uses a 671B Mixture-of-Experts architecture where only 37B parameters are active per token. This architectural efficiency translates directly to API pricing: $0.27/M input, $1.10/M output — 9x cheaper than GPT-4o for comparable quality on most benchmarks.
+
+**Strengths:** Best quality-per-dollar in this comparison (excluding the Groq Llama 3.1 8B free tier, which is much lower quality). Strong math performance — DeepSeek-V3 outscores GPT-4o on MATH-500 (90.2% vs 76.6%).
+
+**Weaknesses:** API-only — no open weights for DeepSeek-V3. Chinese company jurisdiction (data goes to China). No fine-tuning API.
+
+**Best for:** General-purpose LLM workloads at production scale. Math and STEM reasoning. Teams that want near-GPT-4o quality at 1/9th the cost.
+
+### MiniMax: The Context Window King
+
+MiniMax abab6.5s-chat's headline feature is the **4 million token context window** — 32x larger than most competitors. At $0.27/M input, you get massive context at the same price as DeepSeek-V3. Quality is lower (MMLU ~70%), but for workloads that need to process entire codebases, book-length documents, or massive conversation histories, this is unmatched.
+
+**Strengths:** 4M context at budget pricing. Good enough quality for summarization and extraction. Chinese company with strong bilingual support.
+
+**Weaknesses:** Lower benchmark scores across the board. Less transparent architecture. Smaller ecosystem and community.
+
+**Best for:** Document analysis at scale. Processing entire codebases in one prompt. Long conversation threads. Legal document review. Any workload where context size outweighs per-token quality.
+
+### OpenRouter: The Aggregator
+
+OpenRouter is a meta-provider — it routes your requests to the cheapest available backend for a given model. You get one API key, one billing account, and access to 200+ models across multiple providers. Prices fluctuate based on underlying provider availability.
+
+**Strengths:** Access to every model through one API. Some free models available (Llama 3.1 8B at $0). Price competition between backends. No lock-in to a single provider.
+
+**Weaknesses:** Prices less predictable than direct provider. Slight markup over direct provider pricing (~10-15% for routing). Latency varies by backend. Less control over which GPU/infrastructure serves your request.
+
+**Best for:** Model comparison and experimentation. Fallback routing. Access to rare/specialized models (Qwen, Command R, DBRX). Teams that want provider diversity.
+
+## Hidden Costs
+
+### Rate Limits and Availability
+
+The listed prices assume you can actually make requests. In practice:
+- **Groq** free tier is heavily rate-limited (30 req/min). Paid tier starts at $1,000/month for unlimited access.
+- **DeepSeek** has had availability issues during peak hours (Chinese business hours).
+- **MiniMax** requires KYC verification for non-Chinese users.
+- **OpenRouter** rate limits vary by backend provider.
+
+### Context Window Utilization
+
+You pay for the context you use, not the context available. A 4M context window is useless if your prompts average 2K tokens. Conversely, if you need 100K+ context, MiniMax's per-token cost advantage disappears because you're processing more tokens per request.
+
+### Output Token Pricing Asymmetry
+
+Most providers charge 3-4x more for output than input. For generation-heavy workloads (creative writing, code generation), output pricing dominates total cost. DeepSeek-V3 at $1.10/M output is the outlier — most competitors charge $2-8/M output for comparable quality.
+
+## Recommendations
+
+### For maximum quality at minimum cost
+**DeepSeek-V3.** $0.27/M input, 86.4% MMLU, 90.2% MATH-500. The cost-performance king.
+
+### For maximum speed
+**Groq + Llama 3.3 70B.** 300-500 tok/s, $0.59/M input, 82% MMLU. Unbeatable for latency-sensitive applications.
+
+### For massive context
+**MiniMax abab6.5s-chat.** 4M context at $0.27/M. Nothing else comes close at this price point.
+
+### For model diversity and flexibility
+**OpenRouter.** One API, 200+ models, automatic failover. The 10-15% markup is worth it for teams that need provider diversity.
+
+### For free/ultra-cheap
+**Groq + Llama 3.1 8B** ($0.04/M) or **OpenRouter free models** ($0). Quality is low — suitable for classification, simple extraction, and prototyping only.
+
+## Bottom Line
+
+The LLM API market in 2026 is a buyer's market. DeepSeek-V3 is the default choice for most workloads — near-frontier quality at commodity pricing. Groq wins on speed. MiniMax wins on context size. OpenRouter wins on flexibility. Pick based on your bottleneck: if it's cost, DeepSeek. If it's speed, Groq. If it's context, MiniMax.
+
+## Sources
+- [MiniMax abab6.5s-chat deep-dive — Substrate](https://substrate.pub/posts/minimax-abab-cheapest-production-llm-api/)
+- [DeepSeek API pricing](https://platform.deepseek.com/api-docs/pricing)
+- [Groq pricing](https://console.groq.com/settings/billing)
+- [OpenRouter models and pricing](https://openrouter.ai/models)

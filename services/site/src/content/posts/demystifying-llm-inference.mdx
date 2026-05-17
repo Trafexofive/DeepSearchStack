@@ -5,6 +5,18 @@ modified: 2026-05-12
 category: "research"
 tags: ["llm", "inference", "transformers", "kv-cache"]
 excerpt: "A deep dive into how LLMs generate text — from tokenization to the key-value cache that makes autoregressive generation fast."
+
+faq:
+  - question: "What is tokenization in an LLM?"
+    answer: "Tokenization splits text into sub-word units called tokens, each mapped to an integer ID. For example, GPT models use Byte-Pair Encoding. These token IDs index an embedding matrix to produce dense vectors. This step converts human language into a numerical format the model can process."
+  - question: "How does the attention mechanism work during inference?"
+    answer: "Attention computes queries, keys, and values for each token. The attention score between two tokens is the dot product of their query and key vectors, scaled by the inverse square root of the key dimension. This scores how much each token should attend to others, enabling context-aware representations."
+  - question: "What is a KV cache and why is it important?"
+    answer: "The KV cache stores key and value vectors from previous tokens during autoregressive generation. Instead of recomputing attention for all past tokens at each step, the model only computes for the new token and appends to the cache. This reduces per-token work from quadratic to linear, enabling fast generation."
+  - question: "What limits an LLM's context window?"
+    answer: "The context window is the maximum number of tokens a model can attend to due to quadratic memory requirements of full attention. Exceeding it causes truncation or garbled output. Techniques like sliding window, sparse attention, and ring attention help extend this limit."
+  - question: "What key metrics should be monitored during LLM deployment?"
+    answer: "Monitor Time to First Token (TTFT) for latency before the first response character, Tokens Per Second (TPS) for generation throughput, and KV cache memory usage which grows linearly with context length. Use optimized inference engines like vLLM or TensorRT-LLM for production."
 ---
 
 Large language models generate text one token at a time. This post breaks down

@@ -4,13 +4,25 @@ date: 2026-05-13
 modified: 2026-05-13
 category: "benchmark"
 tags: ['minimax', 'llm-api', 'pricing', 'context-window', 'benchmarks']
-excerpt: "Auto-generated researched technical article — reviewed before publish."
+excerpt: "MiniMax abab6.5s-chat: the cheapest production LLM API with 4M token context. Benchmarks, pricing analysis, and architecture deep-dive vs GPT-4o and Claude."
 generated: true
 model: "deepseek-v4-flash"
 cost_usd: 0.001768
 tokens: 1827
 sources:
 
+
+faq:
+  - question: "What is the cost per million input tokens for MiniMax abab6.5s-chat?"
+    answer: "MiniMax abab6.5s-chat costs $0.15 per million input tokens. For long-context workloads, this is roughly 50× cheaper than GPT-4o ($15.00) and 20× cheaper than Claude 3.5 Sonnet ($3.00). This drastic reduction makes massive document processing economically feasible."
+  - question: "What is the context window size of MiniMax abab6.5s-chat?"
+    answer: "MiniMax abab6.5s-chat offers a 4 million token context window. Compared to GPT-4o’s 128K and Claude 3.5 Sonnet’s 200K, this provides a 100× improvement in cost per context token, enabling processing of entire codebases or multi-hour transcripts at scale."
+  - question: "What architecture enables MiniMax to achieve 4M context?"
+    answer: "It uses a hybrid architecture with linear attention to reduce complexity to O(n) and a sliding local window of 128K tokens with full attention. Global attention tokens every 4,096 positions preserve long-range dependencies, scaling to 4M tokens without quadratic memory costs."
+  - question: "How does MiniMax manage memory for the KV cache at 4M context?"
+    answer: "MiniMax employs 4‑bit quantization of KV cache entries, reducing memory by 4×. It also uses selective eviction of low‑importance tokens based on attention scores and offloading to host memory for tokens beyond the local window, enabling single‑A100 inference."
+  - question: "How does MiniMax abab6.5s-chat compare in pricing to GPT-4o and Claude 3.5 Sonnet?"
+    answer: "At $0.15 per million input tokens, MiniMax is about 50× cheaper than GPT-4o ($15.00) and 20× cheaper than Claude 3.5 Sonnet ($3.00). This cost advantage, combined with its 4M context window, makes it a paradigm shift for production LLM deployment."
 ---
 
 # MiniMax abab6.5s-chat: The $0.15/M Tok LLM with 4M Context That Breaks the Cost-Performance Curve

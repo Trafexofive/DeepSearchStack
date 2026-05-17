@@ -4,13 +4,23 @@ date: 2026-05-13
 modified: 2026-05-13
 category: "benchmark"
 tags: ['embeddings', 'rag', 'benchmark', 'semantic-search']
-excerpt: "Auto-generated researched technical article — reviewed before publish."
+excerpt: "We benchmark all-MiniLM-L6-v2, BGE, and E5 on MS MARCO for RAG, measuring recall, latency, and memory to"
 generated: true
 model: "deepseek-v4-flash"
 cost_usd: 0.001765
 tokens: 1815
 sources:
 
+
+faq:
+  - question: "Which embedding model is best for production RAG pipelines?"
+    answer: "There is no single best model; it depends on your priorities. BGE-base-en-v1.5 leads in retrieval accuracy with Recall@5 of 0.438 and MRR@10 of 0.317, while all-MiniLM-L6-v2 offers smaller size and faster inference. Evaluate based on your latency budget, hardware, and domain."
+  - question: "How do all-MiniLM-L6-v2, BGE, and E5 compare on retrieval accuracy?"
+    answer: "On the MS MARCO dataset, BGE-base-en-v1.5 outperforms all-MiniLM-L6-v2 with Recall@1 of 0.229 vs 0.187 and MRR@10 of 0.317 vs 0.278. E5 results were not shown in the table but are typically competitive. BGE offers the best recall for production RAG."
+  - question: "What is the trade-off between accuracy and inference speed for these models?"
+    answer: "all-MiniLM-L6-v2 is faster and smaller, making it suitable for latency-sensitive applications, but at lower retrieval accuracy. BGE and E5 provide higher recall and MRR but require more compute. Choose based on whether speed or precision matters more in your RAG pipeline."
+  - question: "How much memory do these embedding models require?"
+    answer: "Model sizes vary: all-MiniLM-L6-v2 is approximately 80 MB, while BGE-base and E5-base are around 110–440 MB. Peak GPU memory usage also differs, with larger models consuming more VRAM. Benchmark your specific hardware to ensure compatibility, especially when deploying at scale."
 ---
 
 # Embedding Model Showdown: all-MiniLM-L6-v2 vs BGE vs E5 for Production RAG

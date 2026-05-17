@@ -4,13 +4,25 @@ date: 2026-05-13
 modified: 2026-05-13
 category: "guide"
 tags: ['self-hosted', 'linux', 'docker-compose', 'ai-pipeline', 'foss']
-excerpt: "Auto-generated researched technical article — reviewed before publish."
+excerpt: "Build a fully self-hosted AI research pipeline with SearXNG, DeepSeek, and ChromaDB — zero cloud dependencies, complete FOSS stack."
 generated: true
 model: "deepseek-v4-flash"
 cost_usd: 0.001763
 tokens: 1809
 sources:
 
+
+faq:
+  - question: "What is a self-hosted AI research pipeline?"
+    answer: "A self-hosted AI research pipeline uses open-source tools like Ollama, DeepSeek, SearXNG, and ChromaDB to run AI models locally without cloud dependencies. It enables private, cost-effective training, fine-tuning, and inference on your own hardware, giving full control over data and infrastructure."
+  - question: "Why choose zero-cloud AI over cloud-based services?"
+    answer: "Zero-cloud AI eliminates data privacy risks, recurring costs, and vendor lock-in. A 2023 study highlights systemic vulnerabilities from third-party APIs. Self-hosting with FOSS reduces monthly expenses from over $10,000 to hardware and electricity, while ensuring compliance with sensitive research regulations."
+  - question: "Which FOSS tools are used in this pipeline?"
+    answer: "The stack includes Ollama for model serving, DeepSeek as a large language model, SearXNG for private web search, and ChromaDB for vector storage. These tools work together to create a complete, self-contained AI research environment without any cloud dependencies."
+  - question: "How do I install and run models locally with this stack?"
+    answer: "Install Ollama via a simple curl command, then pull models like DeepSeek. Use SearXNG for local search queries and ChromaDB to store embeddings. All components run on commodity hardware—for example, a 7B parameter model needs only 8GB VRAM, achievable with an RTX 3080."
+  - question: "What are the primary benefits for senior engineers?"
+    answer: "Senior engineers gain full control over data, models, and infrastructure, enabling reproducible research and fine-tuning on private datasets. The stack reduces operational costs, avoids API rate limits, and strengthens data sovereignty—critical for regulated industries and long-term AI experimentation."
 ---
 
 # Building a Self-Hosted AI Research Pipeline with Zero Cloud Dependencies — FOSS Stack Guide
