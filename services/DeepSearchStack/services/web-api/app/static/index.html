@@ -124,7 +124,7 @@ async function warehouseStats() {
 
 // ── State ────────────────────────────────────────────────────
 let currentTab = 'search';
-let wEntries = [], wPage = 0, W_PAGE_SIZE = 20;
+let wEntries = [], wPage = 0, W_PAGE_SIZE = 30;
 
 // ── Navigation ───────────────────────────────────────────────
 function switchTab(tab) {
@@ -195,7 +195,6 @@ async function doSearch() {
 }
 
 // ── Warehouse ─────────────────────────────────────────────────
-let wEntries = [], wPage = 0, W_PAGE_SIZE = 30;
 let wSort = 'ingested_at', wOrder = 'desc', wDomain = '', wMinWords = '', wMaxWords = '';
 
 async function loadWarehouse() {
