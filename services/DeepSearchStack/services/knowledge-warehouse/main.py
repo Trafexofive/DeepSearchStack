@@ -98,7 +98,13 @@ def _init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_domain ON content(source_domain)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_ingested ON content(ingested_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_url_hash ON content(url_hash)")
-        # FTS5 for full-text search
+        # FTS5 full-text search with integrity check + auto-rebuild
+        try:
+            conn.execute("SELECT COUNT(*) FROM content_fts").fetchone()
+        except Exception:
+            log.warning("fts5_corrupted — rebuilding")
+            conn.execute("INSERT INTO content_fts(content_fts) VALUES('rebuild')")
+            log.info("fts5_rebuilt")
         conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
                 title, markdown, content, url, author,
