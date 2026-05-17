@@ -14,6 +14,26 @@ networks:
     external: true
 
 services:
+  # --- REVERSE PROXY (single entrypoint) ---
+  nginx:
+    image: nginx:alpine
+    container_name: dss-light-nginx
+    restart: unless-stopped
+    ports:
+      - "${DSS_LIGHT_PORT:-8084}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks: [deepsearch_net]
+    depends_on:
+      - deepsearch
+      - crawler
+      - vector-store
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   postgres:
     image: postgres:15-alpine
     container_name: dss-light-postgres
@@ -61,8 +81,6 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - REDIS_URL=redis://redis:6379/0
       - POSTGRES_URL=postgresql://searchuser:searchpass@postgres:5432/searchdb
-    ports:
-      - "8001:8001"
 
   vector-store:
     build:
@@ -72,8 +90,6 @@ services:
     restart: unless-stopped
     networks: [deepsearch_net]
     volumes: [vector_data:/app/data]
-    ports:
-      - "8004:8004"
 
   crawler:
     build:
@@ -82,7 +98,5 @@ services:
     container_name: dss-light-crawler
     restart: unless-stopped
     networks: [deepsearch_net]
-    ports:
-      - "8000:8000"
     environment:
       - PORT=8000

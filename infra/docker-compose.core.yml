@@ -48,8 +48,6 @@ services:
 
   inference_gateway:
     build: ../services/inference-gateway
-    ports:
-      - "8005:8005"
     environment:
       - INFERENCE_GATEWAY_PORT=8005
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
