@@ -1,6 +1,6 @@
 # SESSION_PICKUP.md — Substrate State
 
-> Last updated: 2026-05-17 · Session: DSS POC→production hardening, core reboot
+> Last updated: 2026-05-17 · Session: DSS production hardening complete
 
 ## Current Status
 

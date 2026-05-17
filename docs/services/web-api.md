@@ -1,99 +1,54 @@
-# Web API — Cross-Domain Aggregation (port 8014)
+# Web API — DeepSearchStack Unified Gateway
 
-> **Status**: ✅ Working (deployed 2026-05-13) · **Dependencies**: search-gateway, search-agent, inference-gateway, warehouse
+> Status: healthy · Port: 8014 (host-accessible) · Updated: 2026-05-17
 
 ## Purpose
-Cross-domain aggregation orchestrator. Queries ALL search sources + knowledge warehouse in parallel, domain-tags results, reconciles facts across domains via LLM, extracts consensus "sources of truth" with citations.
-
-## Pipeline
-```
-Query
-  ├── search-gateway → (searxng|whoogle|wikipedia|ddg|stackexchange|arxiv|yacy)
-  ├── knowledge-warehouse → FTS5 content store
-  ↓
-  Domain Classify → encyclopedia | academic | q_and_a | web | code | internal
-  ↓
-  Deduplicate → Merge → Sort by confidence
-  ↓
-  LLM Reconciliation (inference-gateway)
-    → Extract consensus facts
-    → Identify conflicting claims
-    → Synthesize narrative
-```
+Unified entry point for all DeepSearchStack operations. Aggregates search across warehouse, vector store, and external providers. Proxies warehouse content for single-port access. Serves the web frontend.
 
 ## Endpoints
 
+### Search
 | Method | Path | Description |
 |---|---|---|
-| GET | `/health` | Health + 4 dependency checks |
-| POST | `/api/aggregate` | Cross-domain aggregation + source-of-truth extraction |
-| POST | `/api/search/stream` | Search → synthesize (SSE streaming) |
-| POST | `/api/completion/stream` | Direct LLM completion proxy |
-| GET | `/api/providers` | Available LLM models |
+| POST | `/api/aggregate` | Full search — warehouse → external → reconcile |
+| POST | `/api/aggregate/stream` | SSE streaming — warehouse hits in ~40ms |
+| POST | `/api/search` | Alias for aggregate |
+| POST | `/api/search/stream` | Streaming search → synthesis |
 
-## Aggregate Request
-```json
-{
-  "query": "quantum computing breakthroughs 2025",
-  "max_results": 10,
-  "include_warehouse": true,
-  "reconcile": true
-}
-```
+### Warehouse (proxied from port 8009)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/warehouse/search?q=&limit=` | FTS5 search |
+| GET | `/api/warehouse/list?sort=&order=&domain=` | Paginated listing with sort/filter |
+| GET | `/api/warehouse/content/{id}` | Full entry by ID |
+| GET | `/api/warehouse/stats` | Entry count, domains, size |
 
-## Aggregate Response
-```json
-{
-  "query": "quantum computing breakthroughs 2025",
-  "domains_queried": ["encyclopedia", "web", "q_and_a"],
-  "total_sources": 8,
-  "sources": [
-    {"title": "...", "url": "...", "source": "searxng", "domain": "web", "confidence": 0.6}
-  ],
-  "consensus": [
-    {
-      "claim": "IBM announced a 1,121-qubit processor in 2025",
-      "confidence": 0.95,
-      "supporting_sources": ["[1]", "[4]"],
-      "conflicting_sources": []
-    }
-  ],
-  "synthesis": "2-3 paragraph narrative of what we know with high confidence...",
-  "execution_time_ms": 8194
-}
-```
+### Facts
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/facts?q=` | Query consensus fact database |
 
-## Domain Taxonomy
-| Source | Domain |
-|---|---|
-| searxng, whoogle, yacy, duckduckgo | web |
-| wikipedia | encyclopedia |
-| stackexchange | q_and_a |
-| arxiv | academic |
-| github | code |
-| warehouse | internal |
+### Ingestion
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/ingest/urls` | Bulk URL crawl + warehouse store |
+| POST | `/api/ingest/feed` | RSS/Atom feed ingestion |
 
-## Proxy Access (via API Gateway)
-```bash
-POST /api/dss/aggregate   → web-api:8014/api/aggregate
-POST /api/dss/search/stream → web-api:8014/api/search/stream
-```
+### System
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Health + dependency check |
+| GET | `/api/metrics` | Request counters, latency timers |
+| GET | `/ui` | Mobile-friendly web frontend |
+| GET | `/` | Service info |
+| GET | `/api/providers` | Active search providers |
 
-## Docker
-```bash
-make up dss/web-api
-```
+## Progressive Cascade
+1. Fact DB (0ms cached) → Warehouse (FTS5, ~40ms) → External providers (3-5s) → LLM reconcile (15-20s)
 
-## E2E Test
-```bash
-# Cross-domain aggregation
-curl -s -X POST http://localhost:80/api/dss/aggregate \
-  -H "Content-Type: application/json" \
-  -d '{"query":"Rust async trait stabilization","max_results":10,"reconcile":true}' \
-  | python3 -m json.tool
-
-# Streaming search → answer
-curl -s -N -X POST http://localhost:8014/api/search/stream \
-  -H "Content-Type: application/json" \
-  -d '{"query":"What is Rust ownership"}'
-```
+## Dependencies
+- `knowledge-warehouse:8009` — content storage
+- `search-gateway:8002` — external provider routing
+- `search-agent:8013` — LLM synthesis (optional)
+- `inference_gateway:8005` — LLM reconciliation
+- `crawler:8000` — page crawling for ingest
