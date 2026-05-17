@@ -17,6 +17,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional
 
 import httpx
@@ -80,6 +81,87 @@ SEARCH_GATEWAY_URL = os.environ.get("SEARCH_GATEWAY_URL", "http://search-gateway
 WAREHOUSE_URL = os.environ.get("WAREHOUSE_URL", "http://knowledge-warehouse:8009")
 CRAWLER_URL = os.environ.get("CRAWLER_URL", "http://crawler:8000")
 VECTOR_STORE_URL = os.environ.get("VECTOR_STORE_URL", "http://vector-store:8004")
+FACT_DB_PATH = Path(os.environ.get("FACT_DB_PATH", "/app/volumes/data/facts.json"))
+HASH_DB_PATH = Path(os.environ.get("HASH_DB_PATH", "/app/volumes/data/embed_hashes.json"))
+
+# ── Content hash dedup (prevents re-embedding identical content) ──
+_embed_hashes: set[str] = set()
+
+def _load_hashes():
+    global _embed_hashes
+    try:
+        if HASH_DB_PATH.exists():
+            _embed_hashes = set(json.loads(HASH_DB_PATH.read_text()))
+            log.info("loaded_hashes count=%d", len(_embed_hashes))
+    except Exception as e:
+        log.warning("load_hashes_failed: %s", e)
+
+def _save_hashes():
+    try:
+        HASH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        HASH_DB_PATH.write_text(json.dumps(list(_embed_hashes)))
+    except Exception as e:
+        log.warning("save_hashes_failed: %s", e)
+
+def _content_hash(text: str) -> str:
+    return hashlib.md5(text.encode()).hexdigest()
+
+
+# ── Consensus Fact Database ─────────────────────────────────────
+# Stores high-confidence (verified) facts for instant lookup.
+# Checked before running the full search pipeline.
+
+_fact_db: list[dict] = []
+
+def _load_facts():
+    global _fact_db
+    try:
+        if FACT_DB_PATH.exists():
+            _fact_db = json.loads(FACT_DB_PATH.read_text())
+            log.info("loaded_facts count=%d", len(_fact_db))
+    except Exception as e:
+        log.warning("load_facts_failed: %s", e)
+        _fact_db = []
+
+def _save_facts():
+    try:
+        FACT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        FACT_DB_PATH.write_text(json.dumps(_fact_db, indent=2))
+    except Exception as e:
+        log.warning("save_facts_failed: %s", e)
+
+def _store_verified_facts(facts: list[dict]):
+    """Store verified consensus facts (confidence ≥ 0.80) in fact DB."""
+    for f in facts:
+        if f.get("quality") != "verified":
+            continue
+        claim = f.get("claim", "").strip()
+        if not claim:
+            continue
+        # Check if this claim is already stored
+        existing = any(c.get("claim") == claim for c in _fact_db)
+        if not existing:
+            _fact_db.append({
+                "claim": claim,
+                "confidence": f.get("confidence", 0),
+                "sources": f.get("supporting_sources", []),
+                "stored_at": datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat(),
+            })
+    if _fact_db:
+        _save_facts()
+
+def _query_facts(query: str, limit: int = 5) -> list[dict]:
+    """Simple keyword match against stored facts."""
+    query_lower = query.lower()
+    words = query_lower.split()
+    scored = []
+    for f in _fact_db:
+        claim_lower = f["claim"].lower()
+        score = sum(1 for w in words if w in claim_lower)
+        if score > 0:
+            scored.append((score, f))
+    scored.sort(key=lambda x: -x[0])
+    return [f for _, f in scored[:limit]]
 
 # ─── Metrics (in-memory, no external deps) ──────────────────
 
@@ -189,6 +271,7 @@ class AggregateResponse(BaseModel):
     consensus: Optional[List[ConsensusFact]] = None
     synthesis: Optional[str] = None
     execution_time_ms: int
+    fact_db_hit: bool = False  # returned from consensus fact cache
     # Unified DeepSearch fields
     scraped_urls: int = 0
     rag_chunks: int = 0
@@ -203,7 +286,15 @@ class CompletionRequest(BaseModel):
     provider: Optional[str] = None
 
 
-app = FastAPI(title="DeepSearch Web API", version="6.0.0")
+app = FastAPI(title="DeepSearch Web API", version="6.1.0")
+
+
+@app.on_event("startup")
+async def startup():
+    """Load content hash dedup set and consensus fact database."""
+    _load_hashes()
+    _load_facts()
+    log.info("startup_complete hashes=%d facts=%d", len(_embed_hashes), len(_fact_db))
 
 
 # ─── Helpers ───────────────────────────────────────────────
@@ -385,11 +476,20 @@ async def _scrape_sources(sources: List[SourceResult]) -> list:
 
 
 async def _rag_pipeline(query: str, scraped: list, top_k: int) -> list:
-    """Embed scraped content → semantic search via vector-store."""
+    """Embed scraped content → semantic search via vector-store.
+    Content hash dedup prevents re-embedding identical text."""
     try:
-        # Embed documents
-        docs = [{"text": s["markdown"][:5000], "metadata": {"url": s["url"], "title": s["title"]}}
-                for s in scraped if s.get("markdown")]
+        # Embed documents (skip duplicates via content hash)
+        docs = []
+        for s in scraped:
+            text = s.get("markdown", "")
+            if not text:
+                continue
+            h = _content_hash(text)
+            if h in _embed_hashes:
+                continue
+            _embed_hashes.add(h)
+            docs.append({"text": text[:5000], "metadata": {"url": s["url"], "title": s["title"]}})
         if not docs:
             return []
 
@@ -568,6 +668,27 @@ async def cross_domain_aggregate(req: AggregateRequest):
     t0 = time.time()
     metrics.incr("aggregate.requests")
 
+    # 0. Consensus fact database lookup — instant cached facts
+    fact_results = _query_facts(req.query, limit=3)
+    if fact_results and not req.enable_scraping:
+        elapsed_ms = int((time.time() - t0) * 1000)
+        metrics.incr("aggregate.fact_db_hits")
+        log.info("aggregate_fact_hit query=%s facts=%d time=%dms", req.query, len(fact_results), elapsed_ms)
+        return AggregateResponse(
+            query=req.query,
+            total_sources=len(fact_results),
+            sources=[],
+            domains_queried=[],
+            consensus=[ConsensusFact(
+                claim=f["claim"], confidence=f.get("confidence", 1.0),
+                supporting_sources=f.get("sources", []), conflicting_sources=[],
+                quality="verified",
+            ) for f in fact_results],
+            synthesis=None,
+            execution_time_ms=elapsed_ms,
+            fact_db_hit=True,
+        )
+
     # 1. Warehouse-first search - check local FTS5 before hitting external APIs
     warehouse_results = []
     if req.include_warehouse:
@@ -668,6 +789,9 @@ async def cross_domain_aggregate(req: AggregateRequest):
             if f.get("claim")  # skip empty claims
         ]
         synthesis = reconciliation.get("synthesis")
+        # Store verified facts in persistent fact database
+        if consensus:
+            _store_verified_facts([c.dict() for c in consensus])
 
     elapsed_ms = int((time.time() - t0) * 1000)
     metrics.time("aggregate.duration_ms", elapsed_ms)
@@ -817,6 +941,14 @@ async def get_metrics():
         "vector_store_rate": round(snap["counters"].get("aggregate.vector_store_hits", 0) / total, 3) if total > 0 else 0,
     }
     return snap
+
+
+@app.get("/api/facts")
+async def get_facts(q: str = ""):
+    """Query the consensus fact database."""
+    if q:
+        return {"facts": _query_facts(q, limit=10), "total": len(_fact_db)}
+    return {"facts": _fact_db[-50:], "total": len(_fact_db)}
 
 
 @app.get("/")
