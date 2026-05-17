@@ -101,7 +101,7 @@ def _extract_video(url: str) -> dict | None:
                 "--sub-lang", "en",
                 "--convert-subs", "srt",
                 "--skip-download",
-                "--print", "after_move:%(infojson_filename)s",
+                "--write-info-json",
                 "-o", f"{tmpdir}/%(id)s.%(ext)s",
                 url,
             ],
@@ -228,7 +228,7 @@ async def _llm(prompt: str, system: str = "You are a helpful assistant.", max_to
             },
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        return resp.json().get("content", "") or resp.json()["choices"][0]["message"]["content"]
 
 
 # ─── Endpoints ────────────────────────────────────────────────
