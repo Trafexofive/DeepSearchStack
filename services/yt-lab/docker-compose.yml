@@ -1,0 +1,24 @@
+services:
+  yt-lab:
+    build: .
+    ports:
+      - "${YT_LAB_PORT:-8020}:8020"
+    environment:
+      - WAREHOUSE_URL=http://dss-knowledge-warehouse:8009
+      - WEB_API_URL=http://dss-web-api:8014
+      - INFERENCE_URL=http://inference_gateway:8005/v1/chat/completions
+      - YT_LAB_DATA=/app/data
+    volumes:
+      - ./volumes/data:/app/data
+    networks:
+      - substrate-net
+      - bridge-net
+    restart: unless-stopped
+
+networks:
+  substrate-net:
+    external: true
+    name: infra_substrate-net
+  bridge-net:
+    external: true
+    name: infra_substrate-net

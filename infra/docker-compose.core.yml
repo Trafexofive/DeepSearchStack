@@ -133,6 +133,21 @@ services:
       - substrate-net
       - bridge-net
 
+
+  yt-lab:
+    build: ../services/yt-lab
+    environment:
+      - YT_LAB_PORT=8020
+      - WAREHOUSE_URL=http://dss-knowledge-warehouse:8009
+      - WEB_API_URL=http://dss-web-api:8014
+      - INFERENCE_URL=http://inference_gateway:8005/v1/chat/completions
+      - YT_LAB_DATA=/app/data
+    volumes:
+      - ../services/yt-lab/volumes/data:/app/data
+    networks:
+      - substrate-net
+      - bridge-net
+
   # ─── Infrastructure ────────────────────────────────────────────────────────
 
   redis:
