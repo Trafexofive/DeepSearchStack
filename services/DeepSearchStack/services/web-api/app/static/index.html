@@ -106,19 +106,18 @@ async function aggregate(query) {
 }
 
 async function warehouseSearch(query, page=0) {
-  const resp = await fetch(API.replace(':8014',':8009')+'/search?q='+encodeURIComponent(query||'the')+'&limit=30');
-  if (resp.status===422) return [];
+  const resp = await fetch(API+'/api/warehouse/search?q='+encodeURIComponent(query||'the')+'&limit=30');
   return resp.json();
 }
 
 async function warehouseContent(id) {
-  const resp = await fetch(API.replace(':8014',':8009')+'/content/'+id);
+  const resp = await fetch(API+'/api/warehouse/content/'+id);
   return resp.json();
 }
 
 async function warehouseStats() {
   try {
-    const resp = await fetch(API.replace(':8014',':8009')+'/stats');
+    const resp = await fetch(API+'/api/warehouse/stats');
     return resp.json();
   } catch(e) { return {} }
 }

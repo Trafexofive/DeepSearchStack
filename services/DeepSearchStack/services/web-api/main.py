@@ -985,6 +985,45 @@ class IngestURLsResponse(BaseModel):
     warehouse_entries_after: int
 
 
+@app.get("/api/warehouse/stats")
+async def warehouse_stats_proxy():
+    """Proxy warehouse stats through web-api."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{WAREHOUSE_URL}/stats")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        log.warning("warehouse_stats_proxy_failed: %s", e)
+        return {"total_entries": 0, "db_size_mb": 0}
+
+
+@app.get("/api/warehouse/search")
+async def warehouse_search_proxy(q: str, limit: int = 30):
+    """Proxy warehouse FTS5 search through web-api."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{WAREHOUSE_URL}/search", params={"q": q, "limit": min(limit, 100)})
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        log.warning("warehouse_search_proxy_failed: %s", e)
+        return []
+
+
+@app.get("/api/warehouse/content/{content_id}")
+async def warehouse_content_proxy(content_id: int):
+    """Proxy warehouse content fetch through web-api."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{WAREHOUSE_URL}/content/{content_id}")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        log.warning("warehouse_content_proxy_failed: %s", e)
+        raise HTTPException(status_code=404, detail="Content not found")
+
+
 @app.post("/api/ingest/urls", response_model=IngestURLsResponse)
 async def ingest_urls(req: IngestURLsRequest):
     """Bulk URL ingestion - crawl + warehouse store.
