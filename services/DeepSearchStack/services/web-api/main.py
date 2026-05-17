@@ -22,7 +22,7 @@ from typing import List, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
 
 # Redis cache - optional, fails open if unreachable
@@ -949,6 +949,15 @@ async def get_facts(q: str = ""):
     if q:
         return {"facts": _query_facts(q, limit=10), "total": len(_fact_db)}
     return {"facts": _fact_db[-50:], "total": len(_fact_db)}
+
+
+@app.get("/ui")
+async def ui():
+    """Serve the web frontend."""
+    ui_path = Path(__file__).parent / "app" / "static" / "index.html"
+    if not ui_path.exists():
+        raise HTTPException(status_code=404, detail="UI not built")
+    return FileResponse(ui_path, media_type="text/html")
 
 
 @app.get("/")

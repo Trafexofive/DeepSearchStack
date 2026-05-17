@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DSS — DeepSearch</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;
+  --muted:#8b949e;--accent:#58a6ff;--green:#3fb950;--yellow:#d2991d;
+  --red:#f85149;--purple:#a371f7;--radius:8px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+header h1{font-size:18px;font-weight:600}
+nav{display:flex;gap:4px}
+nav button{background:none;border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:var(--radius);font-size:14px;cursor:pointer;transition:all .15s}
+nav button.active,nav button:hover{color:var(--accent);border-color:var(--accent);background:rgba(88,166,255,.1)}
+main{padding:12px 16px;max-width:800px;margin:0 auto}
+.search-box{display:flex;gap:8px;margin-bottom:16px}
+.search-box input{flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:12px 16px;border-radius:var(--radius);font-size:16px;outline:none;transition:border-color .15s}
+.search-box input:focus{border-color:var(--accent)}
+.search-box button{background:var(--accent);color:#000;border:none;padding:12px 20px;border-radius:var(--radius);font-size:16px;font-weight:600;cursor:pointer;white-space:nowrap}
+.result{border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:10px;background:var(--surface);cursor:pointer;transition:border-color .15s}
+.result:hover{border-color:var(--accent)}
+.result .title{color:var(--accent);font-weight:600;margin-bottom:4px;font-size:15px;word-break:break-word}
+.result .meta{font-size:12px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap}
+.result .snippet{font-size:14px;color:var(--text);margin-top:6px;line-height:1.5;opacity:.85}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge-verified{background:rgba(63,185,80,.15);color:var(--green)}
+.badge-probable{background:rgba(210,153,29,.15);color:var(--yellow)}
+.badge-uncertain{background:rgba(248,81,73,.15);color:var(--red)}
+.stats{font-size:12px;color:var(--muted);margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap}
+.consensus{margin-top:16px}
+.consensus h3{font-size:14px;color:var(--muted);margin-bottom:8px}
+.consensus-item{padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px;font-size:14px}
+.consensus-item .claim{line-height:1.5}
+.consensus-item .sources{font-size:12px;color:var(--muted);margin-top:4px}
+.content-view{padding:8px 0}
+.content-view h2{color:var(--accent);font-size:18px;margin-bottom:4px;word-break:break-word}
+.content-view .url{font-size:12px;color:var(--muted);margin-bottom:12px;word-break:break-all}
+.content-body{font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.content-body h1,.content-body h2,.content-body h3{color:var(--yellow);margin:16px 0 6px}
+.content-body code{background:rgba(88,166,255,.1);padding:2px 6px;border-radius:4px;font-size:13px}
+.content-body pre{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px;overflow-x:auto;font-size:13px;line-height:1.5;margin:8px 0}
+.content-body pre code{background:none;padding:0}
+.content-body blockquote{border-left:3px solid var(--purple);padding-left:12px;color:var(--muted);margin:8px 0}
+.content-body a{color:var(--accent)}
+.pagination{display:flex;justify-content:center;gap:8px;margin:16px 0}
+.pagination button{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:var(--radius);font-size:14px;cursor:pointer}
+.pagination button:disabled{opacity:.4;cursor:default}
+.pagination span{color:var(--muted);font-size:14px;padding:8px}
+.spinner{text-align:center;padding:32px;color:var(--muted)}
+.spinner::after{content:'...';animation:dots 1.5s steps(4,end) infinite}
+@keyframes dots{0%,20%{content:'.'}40%{content:'..'}60%{content:'...'}80%,100%{content:''}}
+.empty{text-align:center;padding:48px;color:var(--muted);font-size:16px}
+.hidden{display:none!important}
+#container-search,#container-warehouse{min-height:300px}
+@media (max-width:480px){
+  header{padding:10px 12px}
+  main{padding:8px 12px}
+  .search-box input{font-size:16px;padding:10px 12px}
+  .search-box button{padding:10px 16px;font-size:15px}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>DSS</h1>
+  <nav>
+    <button id="tab-search" class="active" onclick="switchTab('search')">Search</button>
+    <button id="tab-warehouse" onclick="switchTab('warehouse')">Warehouse</button>
+  </nav>
+</header>
+<main>
+  <div id="container-search">
+    <div class="search-box">
+      <input id="q" type="text" placeholder="Search..." autofocus autocomplete="off" autocorrect="off">
+      <button onclick="doSearch()">Search</button>
+    </div>
+    <div id="search-results"></div>
+    <div id="content-detail" class="hidden"></div>
+  </div>
+  <div id="container-warehouse" class="hidden">
+    <div class="search-box">
+      <input id="wq" type="text" placeholder="Search warehouse...">
+      <button onclick="doWarehouseSearch()">Find</button>
+    </div>
+    <div id="warehouse-stats" class="stats"></div>
+    <div id="warehouse-results"></div>
+    <div id="warehouse-detail" class="hidden"></div>
+  </div>
+</main>
+
+<script>
+// ── API ──────────────────────────────────────────────────────
+const API = location.origin;
+
+async function aggregate(query) {
+  const resp = await fetch(API+'/api/aggregate',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({query,max_results:10,reconcile:true,include_warehouse:true})
+  });
+  return resp.json();
+}
+
+async function warehouseSearch(query, page=0) {
+  const resp = await fetch(API.replace(':8014',':8009')+'/search?q='+encodeURIComponent(query||'the')+'&limit=30');
+  if (resp.status===422) return [];
+  return resp.json();
+}
+
+async function warehouseContent(id) {
+  const resp = await fetch(API.replace(':8014',':8009')+'/content/'+id);
+  return resp.json();
+}
+
+async function warehouseStats() {
+  try {
+    const resp = await fetch(API.replace(':8014',':8009')+'/stats');
+    return resp.json();
+  } catch(e) { return {} }
+}
+
+// ── State ────────────────────────────────────────────────────
+let currentTab = 'search';
+let wEntries = [], wPage = 0, W_PAGE_SIZE = 20;
+
+// ── Navigation ───────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tab-search').classList.toggle('active',tab==='search');
+  document.getElementById('tab-warehouse').classList.toggle('active',tab==='warehouse');
+  document.getElementById('container-search').classList.toggle('hidden',tab!=='search');
+  document.getElementById('container-warehouse').classList.toggle('hidden',tab!=='warehouse');
+  if (tab==='warehouse') loadWarehouse();
+}
+
+// ── Search ───────────────────────────────────────────────────
+async function doSearch() {
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  
+  const el = document.getElementById('search-results');
+  el.innerHTML = '<div class="spinner">Searching</div>';
+  document.getElementById('content-detail').classList.add('hidden');
+  
+  try {
+    const d = await aggregate(q);
+    let html = '';
+    
+    // Stats
+    html += `<div class="stats">
+      <span>${d.total_sources||0} sources</span>
+      <span>${d.domains_queried?.length||0} domains</span>
+      <span>${d.execution_time_ms||0}ms</span>
+      ${d.fact_db_hit?'<span style="color:var(--green)">✓ cached</span>':''}
+    </div>`;
+    
+    // Sources
+    if (d.sources?.length) {
+      d.sources.forEach((s,i) => {
+        html += `<div class="result" onclick="viewContent('${q}','${i}')">
+          <div class="title">${esc(s.title||'Untitled')}</div>
+          <div class="meta">
+            <span>${esc(s.domain||'?')}</span>
+            <span>${(s.confidence*100).toFixed(0)}% conf</span>
+            ${s.summary?`<span>${esc(s.summary).slice(0,80)}</span>`:''}
+          </div>
+          <div class="snippet">${esc(s.description||'').slice(0,250)}</div>
+        </div>`;
+      });
+    }
+    
+    // Consensus
+    if (d.consensus?.length) {
+      html += '<div class="consensus"><h3>Consensus Facts</h3>';
+      d.consensus.forEach(c => {
+        html += `<div class="consensus-item">
+          <div class="claim"><span class="badge badge-${c.quality}">${c.quality}</span> ${esc(c.claim)}</div>
+          ${c.supporting_sources?.length?`<div class="sources">Sources: ${c.supporting_sources.join(', ')}</div>`:''}
+        </div>`;
+      });
+      html += '</div>';
+    }
+    
+    if (!d.sources?.length && !d.consensus?.length) {
+      html += '<div class="empty">No results found</div>';
+    }
+    
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+// ── Warehouse ─────────────────────────────────────────────────
+async function loadWarehouse() {
+  const el = document.getElementById('warehouse-results');
+  el.innerHTML = '<div class="spinner">Loading</div>';
+  
+  try {
+    const stats = await warehouseStats();
+    document.getElementById('warehouse-stats').innerHTML = 
+      `${stats.total_entries||0} entries · ${stats.db_size_mb||0}MB`;
+    
+    wEntries = await warehouseSearch(document.getElementById('wq').value||'the');
+    wPage = 0;
+    renderWarehouseList();
+  } catch(e) {
+    el.innerHTML = `<div class="empty">Error loading warehouse</div>`;
+  }
+}
+
+async function doWarehouseSearch() {
+  const q = document.getElementById('wq').value.trim()||'the';
+  const el = document.getElementById('warehouse-results');
+  el.innerHTML = '<div class="spinner">Searching</div>';
+  try {
+    wEntries = await warehouseSearch(q);
+    wPage = 0;
+    document.getElementById('warehouse-detail').classList.add('hidden');
+    renderWarehouseList();
+  } catch(e) {
+    el.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderWarehouseList() {
+  const el = document.getElementById('warehouse-results');
+  const start = wPage * W_PAGE_SIZE;
+  const end = Math.min(start + W_PAGE_SIZE, wEntries.length);
+  const page = wEntries.slice(start, end);
+  
+  let html = '';
+  page.forEach(e => {
+    html += `<div class="result" onclick="viewWarehouseEntry(${e.id})">
+      <div class="title">${esc(e.title||'Untitled')}</div>
+      <div class="meta">
+        <span>${esc(e.source_domain||'?')}</span>
+        <span>${e.word_count||0} words</span>
+      </div>
+    </div>`;
+  });
+  
+  if (!page.length) {
+    html = '<div class="empty">No entries</div>';
+  }
+  
+  // Pagination
+  const totalPages = Math.ceil(wEntries.length / W_PAGE_SIZE);
+  if (totalPages > 1) {
+    html += '<div class="pagination">';
+    html += `<button onclick="wPage=Math.max(0,wPage-1);renderWarehouseList()" ${wPage===0?'disabled':''}>← Prev</button>`;
+    html += `<span>${wPage+1}/${totalPages}</span>`;
+    html += `<button onclick="wPage=Math.min(${totalPages-1},wPage+1);renderWarehouseList()" ${wPage>=totalPages-1?'disabled':''}>Next →</button>`;
+    html += '</div>';
+  }
+  
+  el.innerHTML = html;
+}
+
+async function viewWarehouseEntry(id) {
+  const el = document.getElementById('warehouse-detail');
+  el.innerHTML = '<div class="spinner">Loading content</div>';
+  el.classList.remove('hidden');
+  document.getElementById('warehouse-results').classList.add('hidden');
+  document.getElementById('warehouse-stats').classList.add('hidden');
+  document.getElementById('wq').parentElement.classList.add('hidden');
+  
+  try {
+    const c = await warehouseContent(id);
+    el.innerHTML = `<div class="content-view">
+      <button onclick="backToWarehouseList()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:var(--radius);font-size:14px;cursor:pointer;margin-bottom:12px">← Back</button>
+      <h2>${esc(c.title||'Untitled')}</h2>
+      <div class="url"><a href="${esc(c.url||'#')}" target="_blank">${esc(c.url||'')}</a></div>
+      <div class="stats" style="margin-bottom:12px">
+        <span>${c.word_count||0} words</span>
+        <span>${esc(c.source_domain||'?')}</span>
+        ${c.author?`<span>by ${esc(c.author)}</span>`:''}
+      </div>
+      <div class="content-body">${renderMarkdown(c.markdown||'')}</div>
+    </div>`;
+    window.scrollTo(0,0);
+  } catch(e) {
+    el.innerHTML = `<div class="empty">Error loading content</div>`;
+  }
+}
+
+function backToWarehouseList() {
+  document.getElementById('warehouse-detail').classList.add('hidden');
+  document.getElementById('warehouse-results').classList.remove('hidden');
+  document.getElementById('warehouse-stats').classList.remove('hidden');
+  document.getElementById('wq').parentElement.classList.remove('hidden');
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function renderMarkdown(md) {
+  // Simple markdown → HTML (headings, code, links, lists, bold, italic)
+  let html = esc(md||'');
+  
+  // Code blocks
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Bold
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // Italic
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+  // Headings
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Blockquotes
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  // Lists
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  
+  return html;
+}
+
+// ── Init ──────────────────────────────────────────────────────
+document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch()});
+document.getElementById('wq').addEventListener('keydown',e=>{if(e.key==='Enter')doWarehouseSearch()});
+</script>
+</body>
+</html>
