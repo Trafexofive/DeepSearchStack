@@ -59,7 +59,7 @@ class SynthesizerAgent:
 
     async def _generate_and_handle_stream(self, request: SynthesizeRequest):
         """A single, robust generator that handles the entire process, including errors."""
-        synthesis_provider = request.llm_provider or "ollama"
+        synthesis_provider = request.llm_provider or "deepseek-chat"
         try:
             async for chunk in self._yield_synthesis_chunks(
                 request, synthesis_provider

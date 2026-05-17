@@ -1,4 +1,5 @@
 """Blog generator — composes prompts + research + inference-gateway calls."""
+import asyncio
 import httpx
 import logging
 import time
@@ -12,6 +13,7 @@ log = logging.getLogger("blog_generator.generator")
 
 INFERENCE_URL = "http://inference_gateway:8005/v1/chat/completions"
 INFERENCE_URL_FALLBACK = "http://localhost:8005/v1/chat/completions"
+EVENT_BUS_URL = "http://event_bus:8003/api/publish"
 
 
 async def _call_inference(messages: list, model: str, max_tokens: int, temperature: float, rlog) -> dict:
@@ -56,18 +58,46 @@ def _record(gen_id: str, rid: str, model: str, topic: str, data: dict, elapsed_m
     }
 
 
+# ─── Event Emission ──────────────────────────────────────────────────────────
+
+async def _emit_generated(result: dict, rid: str = ""):
+    """Emit a post_generated event to event_bus (fire-and-forget)."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                EVENT_BUS_URL,
+                json={
+                    "channel": "blog_generator.generated",
+                    "data": {
+                        "id": result.get("id", ""),
+                        "topic": result.get("topic", ""),
+                        "model": result.get("model", ""),
+                        "tokens": result.get("usage", {}).get("total_tokens", 0),
+                        "cost_usd": result.get("cost_usd", 0),
+                        "duration_ms": result.get("duration_ms", 0),
+                    },
+                    "source": "blog_generator",
+                },
+            )
+    except Exception:
+        log.debug("event_emit_failed (non-blocking)")
+
+
 # ─── Public API ──────────────────────────────────────────────────────────────
 
 async def generate_blog_post(
     topic: str, model: str = "deepseek-chat", style: str = "technical",
-    max_tokens: int = 2048, temperature: float = 0.7, rid: str = "",
+    max_tokens: int = 2048, temperature: float = 0.7,
+    context: str = "", rid: str = "",
 ) -> dict:
-    """Generate a blog post on a topic (no research)."""
+    """Generate a blog post on a topic, optionally enriched with research context."""
     rlog = RequestLogger(log, rid)
     gen_id = uuid.uuid4().hex[:12]
     start = time.monotonic()
 
     prompt = base_prompt(topic, style)
+    if context:
+        prompt = f"Research context:\n{context}\n\n{prompt}"
     messages = [
         {"role": "system", "content": BLOG_SYSTEM_PROMPT},
         {"role": "user", "content": prompt},
@@ -79,6 +109,7 @@ async def generate_blog_post(
     result = _record(gen_id, rid, model, topic, data, elapsed_ms)
 
     rlog.info(f"Blog generated: {gen_id} model={result['model']} tokens={result['usage']['total_tokens']} cost=${result['cost_usd']:.6f} duration={elapsed_ms}ms")
+    asyncio.create_task(_emit_generated(result, rid))
     return result
 
 
@@ -122,4 +153,5 @@ async def generate_researched_blog(
         f"Researched blog: {gen_id} model={result['model']} sources={len(sources)} "
         f"tokens={result['usage']['total_tokens']} cost=${result['cost_usd']:.6f} duration={elapsed_ms}ms"
     )
+    asyncio.create_task(_emit_generated(result, rid))
     return result

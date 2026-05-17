@@ -17,6 +17,12 @@ class SearchProvider(str, Enum):
     DUCKDUCKGO = "duckduckgo"
     STACKEXCHANGE = "stackexchange"
     ARXIV = "arxiv"
+    HACKERNEWS = "hackernews"
+    PUBMED = "pubmed"
+    GITHUB = "github"
+    INTERNET_ARCHIVE = "internetarchive"
+    REDDIT = "reddit"
+    CROSSREF = "crossref"
     CUSTOM = "custom"
 
 

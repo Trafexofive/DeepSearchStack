@@ -31,6 +31,7 @@ class GenerateRequest(BaseModel):
     style: str = Field(default="technical", description="Writing style: technical, tutorial, thought")
     max_tokens: int = Field(default=2048, ge=256, le=8192)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    context: str = Field(default="", description="Research context to enrich generation")
 
 
 class GenerateResponse(BaseModel):
@@ -110,6 +111,7 @@ async def generate(req: GenerateRequest, request: Request):
             style=req.style,
             max_tokens=req.max_tokens,
             temperature=req.temperature,
+            context=req.context,
             rid=rid,
         )
         return GenerateResponse(**result)

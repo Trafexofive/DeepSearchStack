@@ -46,6 +46,7 @@ SERVICE_ROUTES: dict[str, dict] = {
     "audit":       {"host": os.getenv("GEO_AUDIT_HOST", "geo_audit"),               "port": 8011, "prefix": "audit"},
     "queue":       {"host": os.getenv("SUB_MQ_HOST", "sub_mq"),                     "port": 8012, "prefix": "queue"},
     "ingest":      {"host": os.getenv("INGEST_HOST", "ingest"),                       "port": 8008, "prefix": ""},
+    "dss":         {"host": os.getenv("DSS_WEB_API_HOST", "web-api"),                 "port": 8014, "prefix": "api"},
 }
 
 HOP_HEADERS = {
