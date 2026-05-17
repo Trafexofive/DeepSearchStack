@@ -149,6 +149,17 @@ services:
       - ../services/yt-lab/volumes/data:/app/data
 
 
+
+  proxy-rotator:
+    build: ../services/proxy-rotator
+    environment:
+      - POOL_FILE=/app/data/proxy-pool.json
+    volumes:
+      - ../services/proxy-rotator/data:/app/data
+    networks:
+      - bridge-net
+    restart: unless-stopped
+
   proxy:
     build: ../services/proxy
     networks:
