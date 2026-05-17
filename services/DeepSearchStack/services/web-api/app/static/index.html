@@ -196,19 +196,15 @@ async function doSearch() {
 
 // ── Warehouse ─────────────────────────────────────────────────
 async function loadWarehouse() {
-  const el = document.getElementById('warehouse-results');
-  el.innerHTML = '<div class="spinner">Loading</div>';
-  
   try {
     const stats = await warehouseStats();
     document.getElementById('warehouse-stats').innerHTML = 
       `${stats.total_entries||0} entries · ${stats.db_size_mb||0}MB`;
-    
-    wEntries = await warehouseSearch(document.getElementById('wq').value||'the');
-    wPage = 0;
-    renderWarehouseList();
+    // Don't auto-search — wait for user input
+    document.getElementById('warehouse-results').innerHTML = 
+      '<div class="empty">Search to browse entries</div>';
   } catch(e) {
-    el.innerHTML = `<div class="empty">Error loading warehouse</div>`;
+    document.getElementById('warehouse-results').innerHTML = `<div class="empty">Error loading warehouse</div>`;
   }
 }
 
