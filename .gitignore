@@ -1,3 +1,9 @@
 docs/material-resources/staging/*
 .env
 *.db
+services/v0-site-2/node_modules
+.make.cache
+.pi/
+services/ingest/output/
+__pycache__/
+*.pyc

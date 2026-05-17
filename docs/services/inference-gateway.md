@@ -55,3 +55,43 @@ cd services/inference-gateway && docker compose up -d
 # Via core compose
 make up core
 ```
+
+## Python SDK (`sdk/client.py`)
+
+Typed async client with cost estimation. Usable as library or CLI.
+
+```python
+from sdk.client import InferenceGatewayClient
+
+async with InferenceGatewayClient() as gw:
+    # Health + model discovery
+    health = await gw.health()
+    models = await gw.list_models()
+
+    # Chat
+    reply = await gw.chat("Explain Rust ownership.", max_tokens=100)
+    print(f"{reply.content}  ({reply.usage.total_tokens}t, ${cost})")
+
+    # Streaming
+    async for chunk in gw.chat_stream("Tell a joke"):
+        print(chunk, end="")
+
+    # Provider routing
+    reply = await gw.chat("Hello", provider="deepseek")
+
+    # Virtual model cascade
+    reply = await gw.chat("Write a function", model="virtual/coder")
+
+    # Batch (concurrent)
+    results = await gw.chat_batch(["hi", "hey", "hello"], concurrency=3)
+```
+
+### CLI
+```bash
+python sdk/client.py health
+python sdk/client.py models
+python sdk/client.py models --provider deepseek
+python sdk/client.py chat "Explain monads" --temp 0.3 --max-tokens 200
+python sdk/client.py virtual
+python sdk/client.py ping
+```
