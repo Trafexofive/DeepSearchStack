@@ -255,6 +255,38 @@ class DSSClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def warehouse_list(
+        self,
+        sort: str = "ingested_at",
+        order: str = "desc",
+        domain: str | None = None,
+        min_words: int | None = None,
+        max_words: int | None = None,
+        offset: int = 0,
+        limit: int = 30,
+    ) -> list[dict]:
+        """Paginated warehouse listing with sort and filter."""
+        params = {"sort": sort, "order": order, "offset": offset, "limit": limit}
+        if domain: params["domain"] = domain
+        if min_words is not None: params["min_words"] = min_words
+        if max_words is not None: params["max_words"] = max_words
+        resp = await self.client.get(f"{self.web_api}/api/warehouse/list", params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def warehouse_content(self, id: int) -> dict:
+        """Get a single warehouse entry by ID via web-api proxy."""
+        resp = await self.client.get(f"{self.web_api}/api/warehouse/content/{id}")
+        resp.raise_for_status()
+        return resp.json()
+
+    async def facts(self, query: str | None = None) -> dict:
+        """Query the consensus fact database."""
+        params = {"q": query} if query else {}
+        resp = await self.client.get(f"{self.web_api}/api/facts", params=params)
+        resp.raise_for_status()
+        return resp.json()
+
     # ── Crawler ──────────────────────────────────────────────────
 
     async def crawl(self, url: str, timeout: int = 20, bypass_cache: bool = False) -> dict:

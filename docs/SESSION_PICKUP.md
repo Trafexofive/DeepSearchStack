@@ -1,130 +1,119 @@
 # SESSION_PICKUP.md — Substrate State
 
-> Last updated: 2026-05-13 · Session: Phase 2 wiring complete + SDKs
+> Last updated: 2026-05-17 · Session: DSS POC→production hardening, core reboot
 
-## Stack Topology
+## Current Status
 
-Two decoupled stacks on separate networks, cross-connected via `infra_substrate-net` bridge.
+**DSS (DeepSearchStack) — HEALTHY, PRODUCTION-READY**
+- 7 of 12 DSS services running (lean subset for ingest + search)
+- Warehouse: 13,604 entries, 240MB, 13.2M words (up from ~1,100)
+- github.com dominates (12,313 entries), arxiv.org (511)
+- FTS5 auto-rebuild on corruption detection
+- SQLite single-writer pattern (prevents concurrency corruption)
+- Nightly backup: `python3 scripts/dss-backup.py`
+- Health monitor: `scripts/dss-health.sh` (cron-ready)
+- Streaming search: `/api/aggregate/stream` (SSE, warehouse in 40ms)
+- Web UI: `http://localhost:8014/ui` — search + warehouse browser + filters
+- Fact DB: GET /api/facts (consensus facts cache)
 
-```
-┌─ CORE (substrate-core_substrate-net) ─────────────────────┐
-│  api_gateway :8000  ·  workflow_engine :8001               │
-│  llm_gateway :8002  ·  event_bus :8003                     │
-│  inference_gateway :8005  ·  blog_generator :8006           │
-│  redis :6379                                                │
-│  knowledge_bridge :8010  ·  geo_audit :8011                 │
-│  sub_mq :8012  ·  ingest :8008                              │
-│  nginx :80  ←── gateway (sole host-exposed port)            │
-└─────────────────────────────────────────────────────────────┘
-         │
-    infra_substrate-net (shared bridge)
-         │
-┌─ DSS (deepsearch_net) ────────────────────────────────────┐
-│  deepsearch :8001  ·  crawler :8000                        │
-│  search-gateway :8002  ·  vector-store :8004               │
-│  knowledge-warehouse :8009  ·  postgres :5432               │
-│  redis :6379  ·  searxng :8080                              │
-│  whoogle :5000  ·  yacy :8090 (unhealthy)                   │
-└─────────────────────────────────────────────────────────────┘
-```
+**Substrate Core — PARTIALLY BOOTED (internal only)**
+- 9 core services running on Docker network only (no host port mapping)
+- Nginx port 80 conflict with host → no external access
+- inference_gateway, llm_gateway, blog_generator: healthy
+- event_bus, workflow_engine: healthy
+- api_gateway, knowledge_bridge, geo_audit, sub_mq, ingest: running
+- DSS ↔ Core cross-connectivity verified (inference, blog, event bus reachable)
 
 ## Running Services
 
-### Core Stack (12/12 OPERATIONAL)
 ```
-api_gateway          :8000  ✅ — 9-service reverse proxy, aggregate health
-workflow_engine      :8001  ✅ — networkx DAG executor, 5-step pipeline
-llm_gateway          :8002  ✅ — Ollama/Groq router
-event_bus            :8003  ✅ — Redis pub/sub + WebSocket, 30+ events
-inference_gateway    :8005  ✅ — DeepSeek v4-flash, 2 models
-blog_generator       :8006  ✅ — AI blog gen, SQLite tracker, 17 gens
-ingest               :8008  ✅ — RSS/Atom feed polling → blog gen, 4 drafts
-redis                :6379  ✅ — Redis 7 Alpine
-nginx                :80    ✅ — Edge gateway (only exposed port)
-knowledge_bridge     :8010  ✅ — DSS research → blog gen bridge
-geo_audit            :8011  ✅ — AI-SEO/GEO content scorer
-sub_mq               :8012  ✅ — Sub-agent message queue (Redis)
+DSS (5 of 12):
+  knowledge-warehouse :8009  ← SQLite, 13.6K entries
+  crawler             :8000  ← crawl4ai + retry queue
+  web-api             :8014  ← aggregate + proxies + /ui
+  search-gateway      :8002  ← provider routing
+  search-agent        :8013  ← LLM synthesis
+  postgres            :5432  ← DB
+  redis               :6379  ← cache
+
+Stopped (not needed for ingest):
+  deepsearch, vector-store, searxng, whoogle, yacy
+
+Core (10 of 11):
+  inference-gateway :8005   ← DeepSeek API
+  api_gateway       :8000   ← route orchestration
+  llm_gateway       :8002   ← LLM provider abstraction
+  blog_generator    :8006   ← content pipeline
+  event_bus         :8003   ← Redis-based messaging
+  workflow_engine   :8001   ← workflow execution
+  knowledge_bridge  :8010   ← core→DSS bridge
+  geo_audit         :8011   ← location-aware content audit
+  sub_mq            :8012   ← message queue
+  ingest            :8008   ← feed ingestion
+  redis             :6379   ← core Redis
+
+Nginx :80 — FAILED (port conflict), core not externally accessible
 ```
 
-### DSS Stack (8/8 RUNNING, yacy unhealthy)
-```
-deepsearch           :8001  ✅ — 5-stage research pipeline
-search-gateway       :8002  ✅ — Multi-provider search aggr.
-crawler              :8000  ✅ — crawl4ai + SQLite cache v2
-vector-store         :8004  ✅ — ChromaDB
-knowledge-warehouse  :8009  ✅ — SQLite FTS5 content store
-searxng              :8080  ✅ — 14 engines
-whoogle              :5000  ✅ — Google proxy (unreliable)
-postgres             :5432  ✅ — Internal DB
-redis                :6379  ✅ — Cache + circuit breaker
-yacy                 :8090  🔴 — P2P search (slow start, always unhealthy)
-```
-
-## What Changed This Session
-
-### Phase 2 Wiring (3/4 complete)
-1. **api_gateway v0.2.0** — Full reverse proxy. 9 services routed through `/api/{service}/*` with per-service prefix mapping. Aggregate health probes all 9 services. 120s timeout.
-2. **Event publishing fixed** — blog_generator emits `post_generated`, workflow_engine emits `step.{started,completed,failed,skipped}` and `workflow.{started,completed,failed}`. Orphan `infra-*` DNS conflict resolved.
-3. **workflow_engine v0.2.0** — Real DAG execution via networkx (cycle detection, topological sort). Variable resolution (`$params.x`, `$steps.id.output`). Step dispatch table maps agent+task → HTTP endpoints. Full 5-step `seo_content_loop` runs e2e in 76s.
-4. **JWT auth** — Not done (skipped for Content Command Center). Placeholder routes exist.
-
-### Ingest Service
-5. **ingest (:8008)** — RSS/Atom feed polling → dss-crawler content extraction → blog_generator researched post → MDX draft storage. 3 arXiv feeds configured. 4 papers auto-blogged. Fixed `.mdx` glob bug, structured logger kwargs support.
-
-### Stubs Filled (8 files → working)
-10. System prompts for recon, broker, sentinel agents
-11. Monument manifests for content_engine, devops_monitor, financial_hub
-12. Workflow manifests for incident_response, weekly_recon_sweep
-13. Scribe tool script (writer.py) — MDX generation, audit, publish
-
-### AI Slop Index
-14. Slop inventory artifact created — 30+ empty/stub files catalogued. 8 filled this session. 13 doc files + 2 phase todos remain empty.
-
-### Fixes Applied
-15. **HIGH**: knowledge-bridge research context was silently dropped. Added `context` field to blog_generator's GenerateRequest, threaded through to LLM prompt.
-16. MEDIUM: Ingest compose stale container name fixed.
-17. MEDIUM: Warehouse error handling wrapped in try/except.
-18. MEDIUM: knowledge_bridge + geo_audit added to substrate-net for service-name DNS.
-19. MEDIUM: nginx proxy headers fixed.
-
-## What's Next (by priority)
-
-### Content Command Center (post-wiring)
-- [ ] subctl CLI — Go/Rust binary that talks to api_gateway
-- [ ] TUI dashboard (Textual) — real-time control plane
-- [ ] Web dashboard — lightweight status/post browser
-- [ ] CI/CD blog pipeline — git-based MDX → geo-audit → auto-publish
-
-### Phase 2 — Remaining
-- [ ] JWT auth in api_gateway (placeholder routes exist)
-- [ ] Agent runner — reads agent.yml manifests, dispatches tools
-- [ ] Relic provisioner — spins up DBs from relic.yml manifests
-
-### Hardening
-- [ ] Port more providers to inference-gateway (Groq, NVIDIA, Gemini)
-- [ ] Proxy/VPN stack for DSS crawler privacy
-- [ ] Reddit/HN forum monitoring for content ideation
-
-## Quick Test
+## Overnight Jobs
 
 ```bash
-# make all (boot everything)
-make all
-make health core
-make health dss
+# Currently running:
+python3 scripts/dss-overnight.py --crawl 100   # awesome-list + code repos
+# Completed:
+python3 scripts/dss-overnight-books.py 100      # books/papers (845 md files)
 
-# knowledge-bridge: research
-curl -X POST localhost:80/bridge/research \
-  -H 'Content-Type: application/json' \
-  -d '{"topic":"Rust async runtimes","max_sources":2}'
-
-# geo-audit: score content
-curl -X POST localhost:80/audit/content \
-  -H 'Content-Type: application/json' \
-  -d '{"content":"# My Article\n\nContent here...","keyword":"keyword"}'
-
-# sub-mq: publish and consume
-curl -X POST localhost:80/queue/publish \
-  -H 'Content-Type: application/json' \
-  -d '{"channel":"research","payload":{"query":"test"}}'
+# Monitor:
+tail -f /tmp/dss-overnight*.log
+scripts/dss-monitor.sh
 ```
+
+## Tools Built This Session
+
+```
+scripts/
+  dss.py          SDK CLI — 7 commands
+  dss-view.py     vim-style warehouse browser
+  dss-yt.py       YouTube transcript ingest
+  dss-awesome.py  awesome-list link ingester
+  dss-docs.py     9-format doc ingest
+  dss-repo.py     git repo clone + source extraction
+  dss-overnight.py     batch awesome-list crawl
+  dss-overnight-books.py  books/papers batch
+  dss-cleanup.py  warehouse garbage cleanup
+  dss-backup.py   nightly SQLite backup
+  dss-health.sh   health monitor
+  dss-monitor.sh  watch-based dashboard
+```
+
+## SDK
+
+```python
+from sdk import DSSClient
+
+async with DSSClient() as dss:
+    # Search
+    result = await dss.aggregate(query="Rust", max_results=10)
+
+    # Warehouse
+    entries = await dss.list(sort="ingested_at", domain="arxiv.org")
+    stats = await dss.stats()
+    content = await dss.content(id=168)
+
+    # Ingest
+    await dss.ingest_urls(["https://example.com"])
+
+    # Streaming
+    async for event in dss.aggregate_stream("Rust"):
+        print(event["type"])  # warehouse, external, complete
+```
+
+## Next Session
+
+- [ ] Fix nginx port 80 conflict → expose core to host
+- [ ] Wire blog_generator to consume warehouse content
+- [ ] Connect DSS search results into Cortex-Prime workflows
+- [ ] Firefox extension (right-click save)
+- [ ] Remaining dirty git files (manifests, Makefile, settings.yml)
+- [ ] OCR + audio transcription (backlog — needs model selection)
+- [ ] Update port-map.md with current service topology
