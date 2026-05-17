@@ -764,14 +764,17 @@ port: validate-service _cache-stack
 
 .PHONY: all all-down all-restart
 
-all: ## Start core + all service stacks
+all: ## Start all stacks
 	@$(MAKE) up core
+	@$(MAKE) up dss
 
-all-down: ## Stop core + all service stacks
+all-down: ## Stop all stacks
+	@$(MAKE) down dss
 	@$(MAKE) down core
 
-all-restart: ## Restart core + all service stacks
+all-restart: ## Restart all stacks
 	@$(MAKE) restart core
+	@$(MAKE) restart dss
 
 # ======================================================================================
 # UTILITIES

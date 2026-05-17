@@ -1,0 +1,75 @@
+# Incident Response Workflow — Automated downtime handling
+# Triggered by: sentinel alert or POST /api/workflows/trigger
+# Payload: { "workflow": "incident_response", "params": { "service": "...", "error_count": 3 } }
+
+name: incident_response
+version: "1.0"
+description: >
+  Automated incident response pipeline. Receives health check failure alerts,
+  verifies the outage, notifies on event_bus, and escalates if unresolved.
+
+trigger:
+  type: event
+  channel: sentinel.alert
+  params:
+    service:
+      type: string
+      required: true
+      description: "Service name that failed health check"
+    error_count:
+      type: integer
+      required: true
+      description: "Consecutive failures"
+
+steps:
+  - id: verify_outage
+    agent: sentinel
+    task: health_ping
+    inputs:
+      target: $params.service
+    description: "Verify the alert — ping once more to confirm"
+    output: verification
+    retry: 1
+
+  - id: assess_impact
+    agent: sentinel
+    task: assess_impact
+    inputs:
+      service: $params.service
+      verification: $steps.verify_outage.output
+    description: "Check dependent services and estimate blast radius"
+    output: impact_report
+    depends_on: [verify_outage]
+
+  - id: notify
+    agent: sentinel
+    task: emit_notification
+    inputs:
+      service: $params.service
+      error_count: $params.error_count
+      impact: $steps.assess_impact.output
+    description: "Emit alert on event_bus.alert with incident ID"
+    output: notification_result
+    depends_on: [assess_impact]
+
+  - id: escalate
+    agent: sentinel
+    task: check_escalation
+    inputs:
+      service: $params.service
+      elapsed_minutes: 5
+    description: "If unresolved after 5m, escalate to healthcheck log"
+    output: escalation_status
+    depends_on: [notify]
+
+on_success:
+  action: log
+  level: info
+  message: "Incident closed: $params.service — $steps.escalation.output"
+
+on_failure:
+  action: notify
+  channel: event_bus
+  message: "Incident workflow failed for $params.service"
+  retry_workflow: true
+  max_retries: 1

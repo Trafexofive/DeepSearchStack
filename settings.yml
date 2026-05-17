@@ -37,6 +37,15 @@ services:
     port: 8006
     tracker_db: /app/data/tracker.db
 
+  knowledge_bridge:
+    port: 8010
+
+  geo_audit:
+    port: 8011
+
+  sub_mq:
+    port: 8012
+
   event_bus:
     provider: redis
     redis_url: ${REDIS_URL:-redis://localhost:6379/0}

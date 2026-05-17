@@ -1,0 +1,27 @@
+# Financial Hub Monument — Revenue & billing cartridge
+# Bundles: broker agent + ledger_db relic
+
+name: financial_hub
+version: "1.0"
+description: >
+  Stripe webhook ingestion, financial record management, and revenue tracking.
+  Broker agent processes payment events, maintains subscription state, computes
+  daily MRR/churn aggregates, and emits revenue events on the event_bus.
+
+agents:
+  - broker:
+      manifest: manifests/agents/broker/agent.yml
+      description: "Financial agent — webhooks, invoices, subscriptions, MRR"
+
+relics:
+  - ledger_db:
+      manifest: manifests/relics/ledger_db/relic.yml
+      description: "Financial records — Stripe events, invoices, daily aggregates"
+
+environment:
+  STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+  LEDGER_DB_URL: ${LEDGER_DB_URL:-postgresql://substrate:substrate@localhost:5432/substrate}
+
+dependencies:
+  - event_bus
+  - postgres

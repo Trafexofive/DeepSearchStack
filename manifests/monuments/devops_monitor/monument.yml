@@ -1,0 +1,36 @@
+# DevOps Monitor Monument — Uptime & alerting cartridge
+# Bundles: sentinel agent + metrics_store relic + incident_response workflow
+
+name: devops_monitor
+version: "1.0"
+description: >
+  Automated uptime monitoring and incident response for all substrate services.
+  Sentinel agent pings endpoints, records latency metrics, triggers incident
+  workflows on failure, and maintains a time-series metrics store.
+
+agents:
+  - sentinel:
+      manifest: manifests/agents/sentinel/agent.yml
+      description: "Monitoring agent — health checks, metrics, alerting"
+
+relics:
+  - metrics_store:
+      manifest: manifests/relics/metrics_store/relic.yml
+      description: "Time-series uptime, latency, and alert count data"
+
+workflows:
+  - incident_response:
+      manifest: manifests/workflows/incident_response.workflow.yml
+      trigger: event
+      channel: sentinel.alert
+      description: "Verify outage → assess impact → notify → escalate"
+
+environment:
+  CHECK_INTERVAL_SECONDS: ${CHECK_INTERVAL:-60}
+  ALERT_THRESHOLD: ${ALERT_THRESHOLD:-3}
+  MONITORED_SERVICES: >
+    api_gateway:8000, inference_gateway:8005,
+    blog_generator:8006, dss-deepsearch:8001
+
+dependencies:
+  - event_bus

@@ -1,0 +1,34 @@
+# Content Engine Monument — AI-powered content generation cartridge
+# Bundles: scribe agent + content_vault relic + seo_content_loop workflow
+
+name: content_engine
+version: "1.0"
+description: >
+  Full-cycle content generation pipeline. Researches topics via web search,
+  generates GEO-optimized MDX content, audits quality, and publishes to the
+  Astro-based blog. Designed for indie hackers who need consistent output.
+
+agents:
+  - scribe:
+      manifest: manifests/agents/scribe/agent.yml
+      description: "Content generation agent — research, write, audit, publish"
+
+relics:
+  - content_vault:
+      manifest: manifests/relics/content_vault/relic.yml
+      description: "MDX content storage — published posts, drafts, assets, metadata"
+
+workflows:
+  - seo_content_loop:
+      manifest: manifests/workflows/seo_content_loop.workflow.yml
+      trigger: api
+      description: "Research → outline → write → audit → publish"
+
+environment:
+  LLM_PROVIDER: ${LLM_PROVIDER:-inference_gateway}
+  LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash}
+  CONTENT_VAULT_PATH: ${CONTENT_VAULT_PATH:-/data/content}
+
+dependencies:
+  - inference_gateway
+  - event_bus
