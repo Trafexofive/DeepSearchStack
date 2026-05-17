@@ -7,3 +7,4 @@ services/v0-site-2/node_modules
 services/ingest/output/
 __pycache__/
 *.pyc
+services/v0-site-2/
