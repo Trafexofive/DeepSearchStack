@@ -160,12 +160,6 @@ services:
       - bridge-net
     restart: unless-stopped
 
-  proxy:
-    build: ../services/proxy
-    networks:
-      - bridge-net
-      - substrate-net
-    restart: unless-stopped
 
   # ─── Infrastructure ────────────────────────────────────────────────────────
 

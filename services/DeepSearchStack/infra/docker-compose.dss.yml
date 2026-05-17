@@ -177,6 +177,8 @@ services:
       - KNOWLEDGE_WAREHOUSE_URL=http://knowledge-warehouse:8009
       - FORWARD_TO_WAREHOUSE=true
       - CRAWLER_CONCURRENCY=10
+      - HTTP_PROXY=http://proxy-rotator:8888
+      - HTTPS_PROXY=http://proxy-rotator:8888
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
