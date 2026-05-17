@@ -125,6 +125,18 @@ class SearchResult(BaseModel):
     word_count: int = 0
 
 
+class ListResult(BaseModel):
+    id: int
+    url: str
+    title: Optional[str]
+    snippet: str
+    source_domain: Optional[str]
+    ingested_at: str
+    word_count: int = 0
+    author: Optional[str] = None
+    tags: list[str] = []
+
+
 class StatsResponse(BaseModel):
     total_entries: int
     total_words: int
@@ -225,6 +237,65 @@ async def search(
                 word_count=row["word_count"],
                 ingested_at=datetime.fromtimestamp(row["ingested_at"], tz=timezone.utc).isoformat(),
             )
+            for row in rows
+        ]
+
+
+@app.get("/list", response_model=list[ListResult])
+async def list_entries(
+    sort: str = Query("ingested_at", description="Sort field: ingested_at, word_count, title, domain"),
+    order: str = Query("desc", description="Sort order: asc or desc"),
+    domain: Optional[str] = Query(None, description="Filter by domain"),
+    min_words: Optional[int] = Query(None, description="Minimum word count"),
+    max_words: Optional[int] = Query(None, description="Maximum word count"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(30, ge=1, le=100),
+):
+    """Paginated list with sort and filter — newest first by default."""
+    allowed_sorts = {"ingested_at", "word_count", "title", "source_domain"}
+    if sort not in allowed_sorts:
+        sort = "ingested_at"
+    if sort == "source_domain":
+        sort = "source_domain"  # column name matches
+    direction = "DESC" if order == "desc" else "ASC"
+
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        where = []
+        params = []
+        if domain:
+            where.append("source_domain = ?")
+            params.append(domain)
+        if min_words is not None:
+            where.append("word_count >= ?")
+            params.append(min_words)
+        if max_words is not None:
+            where.append("word_count <= ?")
+            params.append(max_words)
+
+        where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+        query = f"""
+            SELECT id, url, title, source_domain, word_count, author, tags, ingested_at
+            FROM content
+            {where_clause}
+            ORDER BY {sort} {direction}
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+        rows = conn.execute(query, params).fetchall()
+
+        return [
+            {
+                "id": row["id"],
+                "url": row["url"],
+                "title": row["title"],
+                "snippet": (row["title"] or "")[:100],
+                "source_domain": row["source_domain"],
+                "ingested_at": datetime.fromtimestamp(row["ingested_at"], tz=timezone.utc).isoformat(),
+                "word_count": row["word_count"],
+                "author": row["author"],
+                "tags": json.loads(row["tags"]) if row["tags"] else [],
+            }
             for row in rows
         ]
 

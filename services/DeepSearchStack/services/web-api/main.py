@@ -985,6 +985,27 @@ class IngestURLsResponse(BaseModel):
     warehouse_entries_after: int
 
 
+@app.get("/api/warehouse/list")
+async def warehouse_list_proxy(
+    sort: str = "ingested_at", order: str = "desc",
+    domain: str = None, min_words: int = None, max_words: int = None,
+    offset: int = 0, limit: int = 30,
+):
+    """Proxy warehouse paginated list with sort/filter."""
+    params = {"sort": sort, "order": order, "offset": offset, "limit": min(limit, 100)}
+    if domain: params["domain"] = domain
+    if min_words is not None: params["min_words"] = min_words
+    if max_words is not None: params["max_words"] = max_words
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{WAREHOUSE_URL}/list", params=params)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        log.warning("warehouse_list_proxy_failed: %s", e)
+        return []
+
+
 @app.get("/api/warehouse/stats")
 async def warehouse_stats_proxy():
     """Proxy warehouse stats through web-api."""

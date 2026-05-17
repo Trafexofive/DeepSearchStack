@@ -195,21 +195,40 @@ async function doSearch() {
 }
 
 // ── Warehouse ─────────────────────────────────────────────────
+let wEntries = [], wPage = 0, W_PAGE_SIZE = 30;
+let wSort = 'ingested_at', wOrder = 'desc', wDomain = '', wMinWords = '', wMaxWords = '';
+
 async function loadWarehouse() {
   try {
     const stats = await warehouseStats();
     document.getElementById('warehouse-stats').innerHTML = 
       `${stats.total_entries||0} entries · ${stats.db_size_mb||0}MB`;
-    // Don't auto-search — wait for user input
-    document.getElementById('warehouse-results').innerHTML = 
-      '<div class="empty">Search to browse entries</div>';
+    await doWarehouseList();
   } catch(e) {
     document.getElementById('warehouse-results').innerHTML = `<div class="empty">Error loading warehouse</div>`;
   }
 }
 
+async function doWarehouseList() {
+  const el = document.getElementById('warehouse-results');
+  document.getElementById('warehouse-detail').classList.add('hidden');
+  el.innerHTML = '<div class="spinner">Loading</div>';
+  try {
+    let url = API+'/api/warehouse/list?sort='+wSort+'&order='+wOrder+'&limit='+W_PAGE_SIZE+'&offset='+(wPage*W_PAGE_SIZE);
+    if (wDomain) url += '&domain='+encodeURIComponent(wDomain);
+    if (wMinWords) url += '&min_words='+wMinWords;
+    if (wMaxWords) url += '&max_words='+wMaxWords;
+    const resp = await fetch(url);
+    wEntries = await resp.json();
+    renderWarehouseList();
+  } catch(e) {
+    el.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
 async function doWarehouseSearch() {
-  const q = document.getElementById('wq').value.trim()||'the';
+  const q = document.getElementById('wq').value.trim();
+  if (!q) { wSort='ingested_at'; wOrder='desc'; wDomain=''; await doWarehouseList(); return; }
   const el = document.getElementById('warehouse-results');
   el.innerHTML = '<div class="spinner">Searching</div>';
   try {
@@ -222,36 +241,60 @@ async function doWarehouseSearch() {
   }
 }
 
+function applyFilters() {
+  wSort = document.getElementById('wsort').value;
+  wOrder = document.getElementById('worder').value;
+  wDomain = document.getElementById('wdomain').value.trim();
+  wMinWords = document.getElementById('wmin').value.trim();
+  wMaxWords = document.getElementById('wmax').value.trim();
+  wPage = 0;
+  doWarehouseList();
+}
+
 function renderWarehouseList() {
   const el = document.getElementById('warehouse-results');
-  const start = wPage * W_PAGE_SIZE;
-  const end = Math.min(start + W_PAGE_SIZE, wEntries.length);
-  const page = wEntries.slice(start, end);
   
-  let html = '';
-  page.forEach(e => {
+  // Filter bar
+  let html = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center;font-size:13px">
+    <select id="wsort" onchange="applyFilters()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:var(--radius);font-size:13px">
+      <option value="ingested_at" ${wSort==='ingested_at'?'selected':''}>Newest</option>
+      <option value="word_count" ${wSort==='word_count'?'selected':''}>Size</option>
+      <option value="title" ${wSort==='title'?'selected':''}>Title</option>
+      <option value="source_domain" ${wSort==='source_domain'?'selected':''}>Domain</option>
+    </select>
+    <select id="worder" onchange="applyFilters()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:var(--radius);font-size:13px">
+      <option value="desc" ${wOrder==='desc'?'selected':''}>↓</option>
+      <option value="asc" ${wOrder==='asc'?'selected':''}>↑</option>
+    </select>
+    <input id="wdomain" placeholder="Domain" value="${esc(wDomain)}" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:var(--radius);font-size:13px;width:120px">
+    <input id="wmin" placeholder="Min w" value="${wMinWords}" type="number" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:var(--radius);font-size:13px;width:70px">
+    <input id="wmax" placeholder="Max w" value="${wMaxWords}" type="number" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:var(--radius);font-size:13px;width:70px">
+    <button onclick="applyFilters()" style="background:var(--accent);color:#000;border:none;padding:4px 12px;border-radius:var(--radius);font-size:13px;cursor:pointer">Filter</button>
+    <button onclick="wSort='ingested_at';wOrder='desc';wDomain='';wMinWords='';wMaxWords='';wPage=0;doWarehouseList();document.getElementById('wq').value=''" style="background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:var(--radius);font-size:13px;cursor:pointer">Reset</button>
+  </div>`;
+  
+  // Entries
+  wEntries.forEach(e => {
     html += `<div class="result" onclick="viewWarehouseEntry(${e.id})">
       <div class="title">${esc(e.title||'Untitled')}</div>
       <div class="meta">
         <span>${esc(e.source_domain||'?')}</span>
         <span>${e.word_count||0} words</span>
+        ${e.author?`<span>by ${esc(e.author)}</span>`:''}
+        ${e.ingested_at?`<span>${e.ingested_at.slice(0,10)}</span>`:''}
       </div>
+      ${e.snippet?`<div class="snippet">${esc(e.snippet).slice(0,120)}</div>`:''}
     </div>`;
   });
   
-  if (!page.length) {
-    html = '<div class="empty">No entries</div>';
-  }
+  if (!wEntries.length) html += '<div class="empty">No entries</div>';
   
   // Pagination
-  const totalPages = Math.ceil(wEntries.length / W_PAGE_SIZE);
-  if (totalPages > 1) {
-    html += '<div class="pagination">';
-    html += `<button onclick="wPage=Math.max(0,wPage-1);renderWarehouseList()" ${wPage===0?'disabled':''}>← Prev</button>`;
-    html += `<span>${wPage+1}/${totalPages}</span>`;
-    html += `<button onclick="wPage=Math.min(${totalPages-1},wPage+1);renderWarehouseList()" ${wPage>=totalPages-1?'disabled':''}>Next →</button>`;
-    html += '</div>';
-  }
+  html += '<div class="pagination">';
+  html += `<button onclick="wPage=Math.max(0,wPage-1);doWarehouseList()" ${wPage===0?'disabled':''}>← Prev</button>`;
+  html += `<span>Page ${wPage+1}</span>`;
+  html += `<button onclick="wPage++;doWarehouseList()" ${wEntries.length<W_PAGE_SIZE?'disabled':''}>Next →</button>`;
+  html += '</div>';
   
   el.innerHTML = html;
 }
@@ -299,28 +342,52 @@ function esc(s) {
 }
 
 function renderMarkdown(md) {
-  // Simple markdown → HTML (headings, code, links, lists, bold, italic)
-  let html = esc(md||'');
+  if (!md) return '';
+  let html = md;
   
-  // Code blocks
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
-  // Inline code
+  // 1. Extract code blocks (protect from further processing)
+  const codeBlocks = [];
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    codeBlocks.push(`<pre><code class="language-${lang||'plain'}">${esc(code)}</code></pre>`);
+    return `\x00CODE${codeBlocks.length-1}\x00`;
+  });
+  
+  // 2. Escape remaining HTML (but not the code block placeholders)
+  html = esc(html);
+  
+  // 3. Inline code
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Bold
+  
+  // 4. Bold and italic
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  // Italic
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  // Links
+  
+  // 5. Links
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
-  // Headings
+  
+  // 6. Headings
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-  // Blockquotes
-  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-  // Lists
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
   
+  // 7. Blockquotes
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  
+  // 8. Unordered lists (group consecutive <li> into <ul>)
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>[\s\S]*?<\/li>)/g, (m) => `<ul>${m}</ul>`);
+  html = html.replace(/<\/ul>\s*<ul>/g, ''); // merge adjacent ul
+
+  // 9. Restore code blocks
+  html = html.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i)]);
+  
+  // 10. Line breaks → paragraphs
+  html = html.replace(/\n\n/g, '</p><p>');
+  html = '<p>' + html + '</p>';
+  html = html.replace(/<p><\/p>/g, '');
+  html = html.replace(/<p>(<h[123]|<ul|<pre|<blockquote)/g, '$1');
+  html = html.replace(/(<\/h[123]>|<\/ul>|<\/pre>|<\/blockquote>)<\/p>/g, '$1');
+
   return html;
 }
 
