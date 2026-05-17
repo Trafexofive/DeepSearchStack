@@ -20,20 +20,32 @@
 | [provider-pattern.md](architecture/provider-pattern.md) | How LLM providers plug in |
 | [language-agnostic.md](architecture/language-agnostic.md) | Language-agnostic microservices + SDKs |
 
-## Services
+## Core Services (12/12 operational)
 | File | Port | Status |
 |---|---|---|
 | [api-gateway.md](services/api-gateway.md) | 8000 | ✅ working |
 | [workflow-engine.md](services/workflow-engine.md) | 8001 | ✅ working |
-| [llm-gateway.md](services/llm-gateway.md) | 8002 | stub |
+| [llm-gateway.md](services/llm-gateway.md) | 8002 | ✅ working |
 | [event-bus.md](services/event-bus.md) | 8003 | ✅ working |
 | [inference-gateway.md](services/inference-gateway.md) | 8005 | ✅ working |
 | [blog-generator.md](services/blog-generator.md) | 8006 | ✅ working |
 | [ingest.md](services/ingest.md) | 8008 | ✅ working |
+| [knowledge-bridge.md](services/knowledge-bridge.md) | 8010 | ✅ working |
+| [geo-audit.md](services/geo-audit.md) | 8011 | ✅ working |
+| [sub-mq.md](services/sub-mq.md) | 8012 | ✅ working |
+
+## DSS Stack (sub-project at `services/DeepSearchStack/`)
+| File | Port | Status |
+|---|---|---|
 | [deepsearch.md](services/deepsearch.md) | 8001 | POC |
 | [search-gateway.md](services/search-gateway.md) | 8002 | POC |
 | [crawler.md](services/crawler.md) | 8000 | POC |
 | [vector-store.md](services/vector-store.md) | 8004 | POC |
+| [knowledge-warehouse.md](services/knowledge-warehouse.md) | 8009 | ✅ working |
+| [search-agent.md](services/search-agent.md) | 8013 | ✅ working |
+| [web-api.md](services/web-api.md) | 8014 | ✅ working |
+
+> DSS services run on a separate `deepsearch_net` bridge-connected to `substrate-net`. See [network-topology.md](architecture/network-topology.md).
 
 ## Manifests
 | File | Purpose |
