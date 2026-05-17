@@ -89,8 +89,8 @@ async def startup():
     global http_client
     http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
     bridge_stats["uptime"] = datetime.now(timezone.utc).isoformat()
-    log.info("bridge_started: deepsearch=%s warehouse=%s crawler=%s blog=%s",
-             DEEPSEARCH_URL, WAREHOUSE_URL, CRAWLER_URL, BLOG_GENERATOR_URL)
+    log.info("bridge_started: web_api=%s warehouse=%s crawler=%s blog=%s",
+             WEB_API_URL, WAREHOUSE_URL, CRAWLER_URL, BLOG_GENERATOR_URL)
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -99,11 +99,11 @@ async def shutdown():
 
 # ─── Helpers ──────────────────────────────────────────────
 
-async def _research_deepsearch(topic: str, max_sources: int) -> dict:
-    """Call dss-deepsearch for real-time research."""
+async def _research_webapi(topic: str, max_sources: int) -> dict:
+    """Call DSS web-api aggregate for research."""
     resp = await http_client.post(
-        f"{DEEPSEARCH_URL}/deepsearch/quick",
-        json={"query": topic, "max_results": max_sources},
+        f"{WEB_API_URL}/api/aggregate",
+        json={"query": topic, "max_results": max_sources, "reconcile": True, "include_warehouse": True},
     )
     resp.raise_for_status()
     return resp.json()
@@ -179,13 +179,13 @@ def _synthesize_context(topic: str, research: dict, warehouse_results: list[dict
 
 @app.post("/bridge/research", response_model=ResearchResponse)
 async def bridge_research(req: ResearchRequest):
-    """Research a topic via deepsearch + warehouse, return synthesized context."""
+    """Research a topic via web-api + warehouse, return synthesized context."""
     bridge_stats["research_calls"] += 1
     bridge_stats["last_bridge"] = datetime.now(timezone.utc).isoformat()
     log.info("research topic=%s", req.topic)
 
     try:
-        research_task = _research_deepsearch(req.topic, req.max_sources)
+        research_task = _research_webapi(req.topic, req.max_sources)
         warehouse_task = _search_warehouse(req.topic) if req.include_warehouse else asyncio.sleep(0)
 
         research_result, warehouse_result = await asyncio.gather(
@@ -193,7 +193,7 @@ async def bridge_research(req: ResearchRequest):
         )
 
         if isinstance(research_result, Exception):
-            log.warning("deepsearch_failed: %s", str(research_result))
+            log.warning("webapi_failed: %s", str(research_result))
             research_result = {"summary": "", "sources": [], "key_findings": []}
         if isinstance(warehouse_result, Exception):
             log.warning("warehouse_failed: %s", str(warehouse_result))
@@ -224,7 +224,7 @@ async def bridge_generate(req: GenerateRequest):
 
     try:
         if not req.context_blob:
-            research = await _research_deepsearch(req.topic, 3)
+            research = await _research_webapi(req.topic, 3)
             context_blob = _synthesize_context(req.topic, research, [])
         else:
             context_blob = req.context_blob
