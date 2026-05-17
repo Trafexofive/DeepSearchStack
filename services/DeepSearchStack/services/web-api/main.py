@@ -822,6 +822,39 @@ async def cross_domain_aggregate(req: AggregateRequest):
     return response
 
 
+@app.post("/api/aggregate/stream")
+async def aggregate_stream(req: AggregateRequest):
+    """Streaming aggregate — warehouse results first, then external.
+    Returns SSE events: warehouse, vector, external, complete."""
+    async def event_stream():
+        t0 = time.time()
+        metrics.incr("aggregate.requests")
+        
+        # 1. Warehouse — send immediately
+        t_wh = time.time()
+        wh = []
+        if req.include_warehouse:
+            wh = await _warehouse_search(req.query, req.max_results)
+        wh_sources = [{"title":r.get("title",""),"url":r.get("url",""),
+            "description":r.get("snippet","")[:500],"source":"warehouse",
+            "domain":r.get("source_domain",""),"confidence":0.9} for r in wh]
+        yield f"data: {json.dumps({'type':'warehouse','sources':wh_sources,'count':len(wh),'time_ms':int((time.time()-t_wh)*1000)})}\n\n"
+        
+        # 2. External (only if needed)
+        if len(wh) < 3:
+            ext = await _search_external(req.query, req.max_results)
+            ext_src = [{"title":r.get("title",""),"url":r.get("url",""),
+                "description":r.get("snippet","")[:500],"source":r.get("source",""),
+                "domain":r.get("source_domain",""),"confidence":r.get("score",0.5)} for r in ext]
+            yield f"data: {json.dumps({'type':'external','sources':ext_src,'count':len(ext),'time_ms':int((time.time()-t_wh)*1000)})}\n\n"
+        
+        # 3. Complete
+        elapsed = int((time.time()-t0)*1000)
+        yield f"data: {json.dumps({'type':'complete','total_sources':len(wh),'time_ms':elapsed})}\n\n"
+    
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.post("/api/search/stream")
 async def stream_search(request: ClientSearchRequest):
     """Search → synthesize (streaming)."""
