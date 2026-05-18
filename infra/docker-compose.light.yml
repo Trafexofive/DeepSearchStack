@@ -70,13 +70,13 @@ services:
       retries: 6
       start_period: 20s
     ports:
-      - "8080:8080"
+      - "8089:8080"
 
   # --- CORE LOGIC ---
   search-gateway:
     build:
-      context: ../services/search-gateway
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/search-gateway/Dockerfile
     container_name: search-gateway-1
     restart: unless-stopped
     networks:
@@ -94,8 +94,8 @@ services:
 
   deepsearch:
     build:
-      context: ../services/deepsearch
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/deepsearch/Dockerfile
     container_name: deepsearch-1
     restart: unless-stopped
     networks:
@@ -139,23 +139,6 @@ services:
       - "8090:80"
     depends_on:
       - deepsearch
-      - frontend
-
-  frontend:
-    build:
-      context: ../services/frontend
-      dockerfile: Dockerfile
-    container_name: frontend-1
-    restart: unless-stopped
-    networks:
-      - deepsearch_net
-    depends_on:
-      deepsearch:
-        condition: service_healthy
-    environment:
-      - NEXT_PUBLIC_DEEPSEARCH_URL=http://localhost:8001
-    ports:
-      - "3002:3000"
 
   openwebui:
     image: ghcr.io/open-webui/open-webui:main

@@ -13,6 +13,9 @@ ENV PYTHONPATH "${PYTHONPATH}:/app"
 COPY services/search-gateway/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy the libs (common library)
+COPY libs /app/libs
+
 # Copy the entire search-gateway application
 COPY services/search-gateway/ /app/search_gateway/
 

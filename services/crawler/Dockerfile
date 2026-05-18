@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY services/crawler/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright browsers
@@ -34,7 +34,7 @@ RUN playwright install-deps
 RUN playwright install chromium
 
 # Copy the application code
-COPY services/crawler/ .
+COPY . .
 
 # Expose the port the app runs on
 EXPOSE 8000

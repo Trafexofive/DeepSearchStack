@@ -1,3 +1,4 @@
+
 # ======================================================================================
 # Makefile - The Master Control Program
 # ======================================================================================
@@ -22,17 +23,15 @@ ENV_FILE := infra/env/.dev.env
 ENV_TEMPLATE := infra/env/.env.template
 
 -include $(ENV_FILE)
-PROJECT_NAME ?= deepsearch
+PROJECT_NAME ?= deepsearch-stack
 
 STACK ?= core
 COMPOSE_DIR := infra
-NETWORK_NAME := deepsearch-net
+NETWORK_NAME := deepsearch_net
 
 # Auto-detect compose file
 ifeq ($(STACK),full)
     COMPOSE_FILE := $(COMPOSE_DIR)/docker-compose.yml
-else ifeq ($(STACK),gemini)
-    COMPOSE_FILE := $(COMPOSE_DIR)/docker-compose.gemini.yml
 else
     COMPOSE_FILE := $(COMPOSE_DIR)/docker-compose.$(STACK).yml
 endif
@@ -45,7 +44,7 @@ service ?=
 SERVICE_FLAG := $(if $(service),$(service),)
 
 .DEFAULT_GOAL := help
-.PHONY: help validate-stack validate-service env-check setup up down restart stop logs ps status build rebuild clean fclean prune shell exec health list-stacks create-networks bench bench-load bench-stress bench-all
+.PHONY: help validate-stack validate-service env-check setup up down restart stop logs ps status build rebuild clean fclean prune shell exec health list-stacks create-networks
 
 # ======================================================================================
 # VALIDATION HELPERS
@@ -104,7 +103,7 @@ up: validate-service setup
 
 down: validate-stack
 	@echo -e "$(YELLOW)🛑 Stopping stack: $(STACK)$(NC)"
-	@$(COMPOSE) down --remove-orphans
+	@$(COMPOSE) down $(if $(service),--remove-orphans,)
 	@echo -e "$(GREEN)✅ Stack stopped$(NC)"
 	@$(MAKE) --no-print-directory list-stacks
 
@@ -199,36 +198,6 @@ prune: fclean
 	fi
 
 # ======================================================================================
-# BENCHMARKING
-# ======================================================================================
-bench:
-	@echo -e "$(CYAN)========================================================="
-	@echo -e "     DeepSearchStack - Realistic Business Intelligence Benchmark"
-	@echo -e "=========================================================$(NC)"
-	@echo -e "$(YELLOW)This benchmark simulates a complete business intelligence workflow:$(NC)"
-	@echo -e "$(YELLOW)Goal → Ingest → Aggregate → Transform → Report → Validate$(NC)"
-	@echo ""
-	@echo -e "$(GREEN)Running realistic business intelligence pipeline...$(NC)"
-	python benchmarks/realistic/business_intelligence_bench.py
-
-bench-load:
-	@echo -e "$(CYAN)========================================================="
-	@echo -e "     DeepSearchStack - Load Benchmark Suite"
-	@echo -e "=========================================================$(NC)"
-	@echo -e "$(YELLOW)Running concurrent load tests...$(NC)"
-	@echo -e "$(GREEN)Load benchmark not implemented yet - create benchmarks/load/concurrent_load_test.py$(NC)"
-
-bench-stress:
-	@echo -e "$(CYAN)========================================================="
-	@echo -e "     DeepSearchStack - Stress Benchmark Suite" 
-	@echo -e "=========================================================$(NC)"
-	@echo -e "$(YELLOW)Running stress tests...$(NC)"
-	@echo -e "$(GREEN)Stress benchmark not implemented yet - create benchmarks/stress/stress_test.py$(NC)"
-
-bench-all: bench bench-load bench-stress
-	@echo -e "$(GREEN)✅ All benchmark suites completed!$(NC)"
-
-# ======================================================================================
 # STACK DASHBOARD
 # ======================================================================================
 
@@ -314,12 +283,6 @@ help:
 	@echo -e "  list-stacks          - Dashboard of all stacks"
 	@echo -e "  health               - Health check report"
 	@echo ""
-	@echo -e "$(GREEN)Testing:$(NC)"
-	@echo -e "  bench                - Run realistic business intelligence benchmark"
-	@echo -e "  bench-load           - Run load tests (not implemented)"
-	@echo -e "  bench-stress         - Run stress tests (not implemented)"
-	@echo -e "  bench-all            - Run all benchmark suites"
-	@echo ""
 	@echo -e "$(GREEN)Utilities:$(NC)"
 	@echo -e "  shell service=<name> - Interactive shell in container"
 	@echo -e "  exec service=<name> cmd=\"<cmd>\" - Execute command"
@@ -330,23 +293,26 @@ help:
 	@echo -e "  prune                - Full system prune (interactive)"
 	@echo ""
 	@echo -e "$(YELLOW)Examples:$(NC)"
-	@echo -e "  make up STACK=gemini"
-	@echo -e "  make logs STACK=gemini service=deepsearch"
-	@echo -e "  make restart STACK=gemini service=llm-gateway"
-	@echo -e "  make down STACK=gemini"
+	@echo -e "  make up STACK=core"
+	@echo -e "  make logs STACK=core service=nginx-proxy-manager"
+	@echo -e "  make restart STACK=services service=glance"
+	@echo -e "  make shell STACK=core service=ddclient"
 	@echo ""
 	@echo -e "$(GRAY)All operations support STACK= and service= parameters$(NC)"
 	@echo -e "$(BLUE)=========================================================================$(NC)"
 
 # ======================================================================================
-# STACK-SPECIFIC SHORTCUTS
+# STACK-SPECIFIC SHORTCUTS (examples - build on generic foundation)
 # ======================================================================================
 
-gemini:
-	@$(MAKE) up STACK=gemini
+core:
+	@$(MAKE) up STACK=core
+	@$(MAKE) up STACK=services
 
-gemini-down:
-	@$(MAKE) down STACK=gemini
+core-down:
+	@$(MAKE) down STACK=services
+	@$(MAKE) down STACK=core
 
-gemini-restart:
-	@$(MAKE) restart STACK=gemini
+core-restart:
+	@$(MAKE) restart STACK=core
+	@$(MAKE) restart STACK=services
