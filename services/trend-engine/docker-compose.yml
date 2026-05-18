@@ -1,0 +1,24 @@
+services:
+  trend-engine:
+    build: .
+    ports:
+      - "${TREND_ENGINE_PORT:-8021}:8021"
+    environment:
+      - WAREHOUSE_URL=http://knowledge-warehouse:8009
+      - YT_LAB_URL=http://host.docker.internal:8020
+      - INFERENCE_URL=http://inference_gateway:8005/v1/chat/completions
+      - TREND_DATA=/app/data
+    volumes:
+      - ./volumes/data:/app/data
+    networks:
+      - substrate-net
+      - bridge-net
+    restart: unless-stopped
+
+networks:
+  substrate-net:
+    external: true
+    name: infra_substrate-net
+  bridge-net:
+    external: true
+    name: infra_substrate-net
