@@ -8,3 +8,4 @@ services/ingest/output/
 __pycache__/
 *.pyc
 services/v0-site-2/
+services/trend-engine/volumes/data/trends-*.json
