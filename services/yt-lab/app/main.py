@@ -238,6 +238,30 @@ async def health():
     return {"status": "ok", "watching": len(watching)}
 
 
+@app.get("/videos/metadata")
+async def video_metadata(video_url: str):
+    """Return full metadata for a video (view_count, like_count, upload_date, etc.) without ingesting."""
+    data = _extract_video(video_url)
+    if not data:
+        raise HTTPException(status_code=502, detail="Failed to extract video")
+    return {
+        "id": data["id"],
+        "url": data["url"],
+        "title": data["title"],
+        "channel": data["channel"],
+        "channel_url": data.get("channel_url", ""),
+        "duration": data["duration"],
+        "upload_date": data["upload_date"],
+        "view_count": data["view_count"],
+        "like_count": data.get("like_count", 0),
+        "comment_count": data.get("comment_count", 0),
+        "description": data.get("description", "")[:500],
+        "language": data.get("language", "en"),
+        "tags": data.get("tags", []),
+        "has_transcript": bool(data.get("transcript")),
+    }
+
+
 @app.post("/videos/ingest", response_model=IngestResponse)
 async def ingest_video(req: VideoRequest):
     """Ingest a single video — transcript → warehouse."""

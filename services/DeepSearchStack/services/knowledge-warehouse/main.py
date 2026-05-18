@@ -98,19 +98,20 @@ def _init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_domain ON content(source_domain)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_ingested ON content(ingested_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_url_hash ON content(url_hash)")
-        # FTS5 full-text search with integrity check + auto-rebuild
-        try:
-            conn.execute("SELECT COUNT(*) FROM content_fts").fetchone()
-        except Exception:
-            log.warning("fts5_corrupted — rebuilding")
-            conn.execute("INSERT INTO content_fts(content_fts) VALUES('rebuild')")
-            log.info("fts5_rebuilt")
+        # FTS5 full-text search
         conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
                 title, markdown, content, url, author,
                 content='content', content_rowid='id'
             )
         """)
+        # Integrity check + auto-rebuild
+        try:
+            conn.execute("SELECT COUNT(*) FROM content_fts").fetchone()
+        except Exception:
+            log.warning("fts5_corrupted — rebuilding")
+            conn.execute("INSERT INTO content_fts(content_fts) VALUES('rebuild')")
+            log.info("fts5_rebuilt")
         # Triggers to keep FTS in sync
         conn.execute("""
             CREATE TRIGGER IF NOT EXISTS content_ai AFTER INSERT ON content BEGIN
