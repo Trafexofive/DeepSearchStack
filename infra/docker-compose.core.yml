@@ -108,6 +108,19 @@ services:
       - substrate-net
       - bridge-net
 
+  trend-engine:
+    build: ../services/trend-engine
+    network_mode: host
+    environment:
+      - TREND_ENGINE_PORT=8021
+      - WAREHOUSE_URL=http://localhost:8009
+      - YT_LAB_URL=http://localhost:8020
+      - INFERENCE_URL=http://localhost:8005/v1/chat/completions
+      - TREND_DATA=/app/data
+    volumes:
+      - ../services/trend-engine/volumes/data:/app/data
+    restart: unless-stopped
+
   sub_mq:
     build: ../services/sub-mq
     environment:

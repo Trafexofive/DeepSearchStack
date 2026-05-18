@@ -1,0 +1,56 @@
+# viral_trend_sweep — Automated viral trend analysis sweep
+# Runs periodically: scan warehouse → score videos → persist signals → surface hot content
+#
+# Trigger: cron (every 6h) or manual POST
+
+id: viral_trend_sweep
+name: "Viral Trend Sweep"
+description: "Scans the knowledge warehouse for trending YouTube content, scores viral potential, and surfaces hot content."
+trigger:
+  type: cron
+  schedule: "0 */6 * * *"   # every 6 hours
+enabled: true
+timeout_seconds: 600
+retry:
+  max_attempts: 2
+  backoff_seconds: 60
+
+steps:
+  - id: scan_trends
+    service: trend-engine
+    endpoint: POST /trends/scan
+    payload:
+      max_videos: 50
+      since_hours: 168
+      min_views: 500
+    on_failure: abort
+
+  - id: extract_hot
+    service: trend-engine
+    endpoint: GET /trends/hot
+    payload:
+      limit: 20
+    on_failure: continue
+
+  - id: extract_topics
+    service: trend-engine
+    endpoint: GET /trends/topics
+    payload:
+      limit: 15
+    on_failure: continue
+
+  - id: notify
+    service: sub-mq
+    endpoint: POST /publish
+    payload:
+      topic: "viral_trends"
+      data:
+        source: "viral_trend_sweep"
+        timestamp: "{{ workflow.timestamp }}"
+        hot_count: "{{ steps.extract_hot.response.count }}"
+        top_topics: "{{ steps.extract_topics.response.topics[:5] }}"
+    on_failure: continue
+
+output:
+  artifact: "viral-trend-sweep-{{ workflow.timestamp }}"
+  format: json

@@ -1,0 +1,31 @@
+# viral-trend-analysis — Stack compose
+# Services: trend-engine + yt-lab (requires warehouse + inference from core/DSS stacks)
+# Both use host networking to reach localhost services.
+# Boot: docker compose -f infra/docker-compose.viral-trend.yml up -d
+
+services:
+  trend-engine:
+    build: ../services/trend-engine
+    network_mode: host
+    environment:
+      - TREND_ENGINE_PORT=8021
+      - WAREHOUSE_URL=http://localhost:8009
+      - YT_LAB_URL=http://localhost:8020
+      - INFERENCE_URL=http://localhost:8005/v1/chat/completions
+      - TREND_DATA=/app/data
+    volumes:
+      - ../services/trend-engine/volumes/data:/app/data
+    restart: unless-stopped
+
+  yt-lab:
+    build: ../services/yt-lab
+    network_mode: host
+    environment:
+      - YT_LAB_PORT=8020
+      - WAREHOUSE_URL=http://localhost:8009
+      - WEB_API_URL=http://localhost:8014
+      - INFERENCE_URL=http://localhost:8005/v1/chat/completions
+      - YT_LAB_DATA=/app/data
+    volumes:
+      - ../services/yt-lab/volumes/data:/app/data
+    restart: unless-stopped

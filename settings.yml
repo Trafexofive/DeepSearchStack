@@ -43,6 +43,12 @@ services:
   geo_audit:
     port: 8011
 
+  trend_engine:
+    port: 8021
+
+  yt_lab:
+    port: 8020
+
   sub_mq:
     port: 8012
 

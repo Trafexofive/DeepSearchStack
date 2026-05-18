@@ -1,6 +1,6 @@
 # Service Port Registry
 
-> Updated: 2026-05-17 · Session: reverse proxy consolidation
+> Updated: 2026-05-18 · Session: viral-trend-analysis stack
 
 ## Port Philosophy
 One proxy per stack. All internal services communicate via Docker DNS. No direct host port exposure to internal services — everything routes through stack-specific nginx reverse proxies. See [reverse-proxy.md](reverse-proxy.md) for full architecture.
@@ -9,7 +9,7 @@ One proxy per stack. All internal services communicate via Docker DNS. No direct
 
 | Port | Stack | Service | Route |
 |---|---|---|---|
-| 8080 | core | nginx | `/` → api_gateway:8000, `/inference/` → inference_gateway:8005 |
+| 8080 | core | nginx | `/` → api_gateway:8000, `/inference/` → inference_gateway:8005, `/trends/` → trend-engine:8021, `/yt-lab/` → yt-lab:8020 |
 | 8082 | site | nginx | Static Astro site |
 | 8083 | dss | nginx | `/dss/{api,search,crawl,warehouse,vectors,agent,gateway}/` |
 | 8084 | light | nginx | Same DSS routes (dev stack) |
@@ -31,6 +31,7 @@ One proxy per stack. All internal services communicate via Docker DNS. No direct
 | geo_audit | 8011 | substrate-net, bridge-net |
 | sub_mq | 8012 | substrate-net, bridge-net |
 | yt-lab | 8020 | host network |
+| trend-engine | 8021 | substrate-net, bridge-net |
 | proxy-rotator | 8888 | bridge-net |
 | redis | 6379 | substrate-net |
 
@@ -62,5 +63,8 @@ knowledge_bridge → web-api:8014       (DSS queries from core)
 inference_gateway ← web-api:8014      (LLM reconciliation)
 yt-lab → inference_gateway:8005       (LLM summaries)
 yt-lab → warehouse:8009               (transcript storage)
+trend-engine → yt-lab:8020            (video metadata)
+trend-engine → inference_gateway:8005  (LLM trend insights)
+trend-engine → warehouse:8009          (content search + baseline)
 crawler → proxy-rotator:8888          (outbound proxy for scraping)
 ```
