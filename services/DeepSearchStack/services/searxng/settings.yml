@@ -1,6 +1,7 @@
 # ===================================================================
 # SearXNG — Maximum Bloated Configuration for DeepSearchStack
 # All engines enabled, all formats, no rate limits
+# Proxied through proxy-rotator:8888 (Tor-backed)
 # ===================================================================
 
 use_default_settings: true
@@ -178,7 +179,6 @@ engines:
     disabled: false
   - name: dictzone
     engine: dictzone
-    
     disabled: false
 
   # --- Media ---
@@ -300,3 +300,6 @@ outgoing:
   max_request_timeout: 30.0
   useragent_suffix: ""
   enable_http2: true
+  proxies:
+    http: http://proxy-rotator:8888
+    https: http://proxy-rotator:8888

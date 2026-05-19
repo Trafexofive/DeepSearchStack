@@ -318,8 +318,9 @@ _crawler: Optional[AsyncWebCrawler] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _crawler
-    log.info("Starting crawl4ai AsyncWebCrawler...")
-    _crawler = AsyncWebCrawler(verbose=False)
+    proxy_url = os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY", "")
+    log.info("Starting crawl4ai AsyncWebCrawler (proxy=%s)...", proxy_url or "direct")
+    _crawler = AsyncWebCrawler(verbose=False, proxy=proxy_url if proxy_url else None)
     await _crawler.start()
     # Background warehouse forward retry worker
     retry_task = asyncio.create_task(_retry_pending_forwards())

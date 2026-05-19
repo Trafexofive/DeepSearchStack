@@ -157,6 +157,7 @@ services:
     restart: unless-stopped
     networks:
       - deepsearch_net
+      - infra_substrate-net
     volumes:
       - ../services/searxng/settings.yml:/etc/searxng/settings.yml
     cap_drop: [ALL]
