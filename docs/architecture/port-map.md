@@ -9,7 +9,7 @@ One proxy per stack. All internal services communicate via Docker DNS. No direct
 
 | Port | Stack | Service | Route |
 |---|---|---|---|
-| 8080 | core | nginx | `/` → api_gateway:8000, `/inference/` → inference_gateway:8005, `/trends/` → trend-engine:8021, `/yt-lab/` → yt-lab:8020 |
+| 8080 | core | nginx | `/` → api_gateway:8000, `/inference/` → inference_gateway:8005, `/trends/` → trend-engine:8021, `/agg/` → trends-aggregator:8022, `/yt-lab/` → yt-lab:8020 |
 | 8082 | site | nginx | Static Astro site |
 | 8083 | dss | nginx | `/dss/{api,search,crawl,warehouse,vectors,agent,gateway}/` |
 | 8084 | light | nginx | Same DSS routes (dev stack) |
@@ -32,6 +32,7 @@ One proxy per stack. All internal services communicate via Docker DNS. No direct
 | sub_mq | 8012 | substrate-net, bridge-net |
 | yt-lab | 8020 | host network |
 | trend-engine | 8021 | host network |
+| trends-aggregator | 8022 | substrate-net, bridge-net | Multi-source: SearXNG, GitHub, YouTube, HN, LLM reports |
 | proxy-rotator | 8888 (proxy), 8030 (API) | bridge-net | Tor-backed: :8888 HTTP → privoxy → tor :9050 SOCKS5 |
 | redis | 6379 | substrate-net |
 
@@ -66,6 +67,12 @@ yt-lab → warehouse:8009               (transcript storage)
 trend-engine → yt-lab:8020            (video metadata)
 trend-engine → inference_gateway:8005  (LLM trend insights)
 trend-engine → warehouse:8009          (content search + baseline)
+trends-aggregator → searxng:8080       (multi-engine web search)
+trends-aggregator → crawler:8000        (GitHub, HN scraping)
+trends-aggregator → yt-lab:8020         (YouTube data)
+trends-aggregator → trend-engine:8021   (viral scoring)
+trends-aggregator → warehouse:8009      (historical data)
+trends-aggregator → inference_gateway:8005 (LLM market reports)
 crawler → proxy-rotator:8888          (outbound proxy for scraping)
 ```
 

@@ -121,6 +121,26 @@ services:
       - ../services/trend-engine/volumes/data:/app/data
     restart: unless-stopped
 
+  trends-aggregator:
+    build: ../services/trends-aggregator
+    environment:
+      - TRENDS_AGG_PORT=8022
+      - SEARXNG_URL=http://searxng:8080
+      - CRAWLER_URL=http://crawler:8000
+      - YT_LAB_URL=http://localhost:8020
+      - TREND_ENGINE_URL=http://localhost:8021
+      - WAREHOUSE_URL=http://knowledge-warehouse:8009
+      - INFERENCE_URL=http://inference_gateway:8005/v1/chat/completions
+      - TRENDS_AGG_DATA=/app/data
+    volumes:
+      - ../services/trends-aggregator/volumes/data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - substrate-net
+      - bridge-net
+    restart: unless-stopped
+
   sub_mq:
     build: ../services/sub-mq
     environment:

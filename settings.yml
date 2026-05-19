@@ -46,6 +46,9 @@ services:
   trend_engine:
     port: 8021
 
+  trends_aggregator:
+    port: 8022
+
   yt_lab:
     port: 8020
 
