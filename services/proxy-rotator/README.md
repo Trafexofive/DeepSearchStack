@@ -1,71 +1,81 @@
-# proxy-rotator — Free Proxy Aggregation + Rotation
+# proxy-rotator v2 — Tor-Backed Rotating HTTP Proxy
 
-Fetches HTTP proxies from 10 free sources, tests them for reliability, and maintains a pool of working proxies. Bundles tinyproxy as a forward proxy that routes through the best available proxy.
+Embeds tor + privoxy + tinyproxy in a single container. All outbound traffic routes through Tor with automatic circuit rotation (new exit IP every 10 minutes). Also maintains a secondary pool of free HTTP proxies.
+
+## Architecture
+
+```
+proxy-rotator (single container, :8888)
+  ├── tor (:9050)         → SOCKS5 to internet (rotating circuits)
+  ├── privoxy (:8118)     → HTTP→SOCKS5 bridge, forwards to tor
+  └── tinyproxy (:8888)   → HTTP forward proxy, upstreams through privoxy
+```
+
+Services set `HTTP_PROXY=http://proxy-rotator:8888` — all outbound traffic automatically routes through Tor.
 
 ## Quick Start
 
 ```bash
-# Check health + pool size
+# Health check
 curl http://localhost:8030/health
+# {"status":"ok","version":"2.0.0","tor":true,"privoxy":true,"tinyproxy":true,...}
 
-# View working proxies
+# Test proxy chain
+curl -x http://localhost:8888 http://httpbin.org/ip
+# {"origin": "193.189.100.201"}  ← Tor exit node
+
+# View pool (Tor + free proxies)
 curl http://localhost:8030/pool?limit=5
 
-# Trigger manual refresh
-curl -X POST http://localhost:8030/refresh
-
-# Get a random working proxy
+# Get random proxy
 curl http://localhost:8030/random
+
+# Tor status
+curl http://localhost:8030/tor/status
 ```
 
 ## Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Pool size, proxy alive status |
-| GET | `/pool?limit=` | List working proxies by latency |
-| POST | `/refresh` | Trigger manual pool refresh |
-| GET | `/random` | Random proxy from top 30 |
+| GET | `/health` | Tor, privoxy, tinyproxy status + pool size |
+| GET | `/pool?limit=` | Combined pool: Tor + working free proxies |
+| POST | `/refresh` | Trigger free proxy pool refresh |
+| GET | `/random` | Random working proxy (Tor always available) |
+| GET | `/tor/status` | Tor circuit status |
 
-## Proxy
+## Proxy Ports
 
-Services use `proxy-rotator:8888` as their HTTP proxy. The rotator automatically selects the fastest working proxy and configures tinyproxy to forward through it.
+| Port | Service | Protocol |
+|------|---------|----------|
+| 8888 | tinyproxy | HTTP forward proxy (use this) |
+| 8118 | privoxy | HTTP proxy → Tor (internal) |
+| 9050 | tor | SOCKS5 (internal) |
+| 8030 | API | Health/pool management |
 
-```bash
-# From any Docker container
-export HTTP_PROXY=http://proxy-rotator:8888
-curl http://example.com  # routed through fastest free proxy
+## Tor Circuit Rotation
+
+- **MaxCircuitDirtiness: 600s** — New circuit (new exit IP) every 10 minutes
+- **NewCircuitPeriod: 30s** — Circuit pre-building for smooth rotation
+- Tor data persists in `/tmp/tor` volume for faster restarts
+
+## Using from Docker Services
+
+```yaml
+services:
+  my-service:
+    environment:
+      - HTTP_PROXY=http://proxy-rotator:8888
+      - HTTPS_PROXY=http://proxy-rotator:8888
+    networks:
+      - infra_substrate-net  # Must share network with proxy-rotator
 ```
 
-## Architecture
+## Free Proxy Pool
 
-```
-proxy-rotator (:8030 API, :8888 proxy)
-  ├── Fetch 10 free proxy list sources
-  ├── Test 500 proxies with 100 concurrency (5s timeout)
-  ├── Sort by latency, keep top 32
-  ├── Write fastest as tinyproxy Upstream
-  ├── Restart tinyproxy with new upstream
-  └── Refresh every 30 minutes
-```
+Secondary pool of free HTTP proxies from GitHub sources — refreshed every 30 minutes. Used as fallback when Tor is slow. Tested against httpbin.org/ip for connectivity.
 
-## Proxy Sources
-
-- TheSpeedX PROXY-List (GitHub)
-- jetkai proxy-list (GitHub)
-- hookzof socks5_list (GitHub)
-- roosterkid openproxylist (GitHub)
-- monosans proxy-list (GitHub)
-- ProxyScrape v2 API
-- ProxyLists.net JSON feed
-
-## Limitations
-
-- Free proxies are unstable — pool size fluctuates
-- Some proxies strip headers or inject content
-- Reddit/Facebook aggressively block known proxy IPs
-- Not a SOCKS5 proxy — HTTP only
-- Docker source IP still traces back to host (not anonymized)
+Sources: TheSpeedX, jetkai, roosterkid, monosans, ProxyScrape
 
 ## Building
 

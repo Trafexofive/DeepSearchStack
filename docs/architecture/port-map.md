@@ -31,8 +31,8 @@ One proxy per stack. All internal services communicate via Docker DNS. No direct
 | geo_audit | 8011 | substrate-net, bridge-net |
 | sub_mq | 8012 | substrate-net, bridge-net |
 | yt-lab | 8020 | host network |
-| trend-engine | 8021 | substrate-net, bridge-net |
-| proxy-rotator | 8888 | bridge-net |
+| trend-engine | 8021 | host network |
+| proxy-rotator | 8888 (proxy), 8030 (API) | bridge-net | Tor-backed: :8888 HTTP → privoxy → tor :9050 SOCKS5 |
 | redis | 6379 | substrate-net |
 
 ## DSS Stack — Internal Ports
