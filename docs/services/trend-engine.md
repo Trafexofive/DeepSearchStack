@@ -1,6 +1,7 @@
 # trend-engine — Viral Trend Analysis Engine
 
-> Status: working · Port: 8021 · Dependencies: yt-lab, knowledge-warehouse, inference_gateway
+> Status: working · Port: 8021 · Dependencies: yt-lab (:8020), knowledge-warehouse (:8009), inference_gateway (:8005)
+> Last tuned: 2026-05-18 — live-tested with @Fireship (13 videos), 2 HOT detected
 
 ## Purpose
 
@@ -9,11 +10,15 @@ Real-time viral trend detection and scoring for YouTube content. Computes view v
 ## Architecture
 
 ```
-trend-engine (:8021)
-├── yt-lab (:8020)           ← video metadata extraction
+trend-engine (:8021, host network)
+├── yt-lab (:8020)              ← GET /videos/metadata (view_count, like_count, upload_date)
 ├── knowledge-warehouse (:8009) ← content search + historical data
 └── inference_gateway (:8005)   ← LLM-powered trend insights
 ```
+
+> **Network note:** trend-engine and yt-lab both use host networking. All internal URLs
+> are `http://localhost:{port}`. This is required because Docker bridge containers
+> can't reach host-bound ports on this machine.
 
 ## Endpoints
 
@@ -110,3 +115,48 @@ Or as a standalone stack with yt-lab:
 make build viral-trend
 make up viral-trend
 ```
+
+## Tuning Notes
+
+### Engagement Ratio (currently 0.0 in most cases)
+yt-dlp's `--write-info-json` doesn't reliably include `like_count`/`comment_count`
+in the default extract. These fields require `--parse-metadata` or the YouTube API.
+To fix: add `like_count`/`comment_count` extraction via yt-dlp parse flags, or
+switch to YouTube Data API v3 for engagement data.
+
+### Topic Extraction
+Current implementation is keyword-based with bigram extraction from titles.
+Noise issues: stopword bigrams leak through ("can't believe", "just hijacked").
+To fix: LLM-powered topic extraction on the top-N videos per scan, or use a
+proper NLP pipeline (spaCy noun phrase extraction).
+
+### Channel Baseline
+Outlier scores max out at 5.0σ for all videos when computed from small samples
+(<20 videos per channel). The baseline needs a minimum of ~30 videos for
+statistical significance. Consider caching baselines in the trend data store.
+
+### Performance
+Metadata enrichment runs 5 concurrent yt-dlp calls via semaphore. A 13-video
+channel pulse takes ~2-3 minutes. For production: cache metadata in warehouse
+or trend-engine's own data store. Consider adding `view_count`, `like_count`,
+`upload_date` columns to the warehouse schema so bulk scans don't need yt-dlp.
+
+### Score Calibration
+The model currently scores known viral Fireship videos at ~20-46 (warm-hot).
+Megaviral (80+) requires 10K+ views/hr with high engagement and youth factor.
+Calibrate against known viral benchmarks: MrBeast, trending tab, breakouts.
+
+### yt-lab Dependency
+Trend-engine depends on the new `GET /videos/metadata?video_url=` endpoint
+added to yt-lab (commit `bb4d9eb`). Without it, view counts come back as 0
+and all scores flatline.
+
+### Network Topology
+Both yt-lab and trend-engine use `network_mode: host` because:
+1. yt-lab needs host IP to avoid YouTube's datacenter blocking
+2. trend-engine needs host network to reach yt-lab via localhost
+3. Docker bridge containers on this machine cannot reach host-bound ports
+   (iptables/firewalld restriction)
+
+Warehouse (:8009) and inference (:8005) must be port-mapped to host for the
+same reason when trend-engine is on host network.
