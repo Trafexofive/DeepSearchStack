@@ -68,3 +68,22 @@ trend-engine → inference_gateway:8005  (LLM trend insights)
 trend-engine → warehouse:8009          (content search + baseline)
 crawler → proxy-rotator:8888          (outbound proxy for scraping)
 ```
+
+## Volume Persistence
+
+All stacks preserve data across `docker compose down` (without `-v`):
+
+| Stack | Volume | Survives | Contents |
+|-------|--------|----------|----------|
+| core | `infra_warehouse_data` | ✅ | Trend analysis signals |
+| core | `infra_redis-data` | ✅ | Event bus state |
+| DSS | `substrate-dss_warehouse_data` | ✅ | warehouse.db (69 entries) |
+| DSS | `substrate-dss_postgres_data` | ✅ | Vector store + agent state |
+| DSS | `substrate-dss_redis_data` | ✅ | Cache + rate limit state |
+| DSS | `substrate-dss_yacy_data` | ✅ | YaCy index |
+| DSS | `substrate-dss_vector_data` | ✅ | ChromaDB embeddings |
+
+**Rule:** `make down <stack>` preserves volumes. `make fclean <stack>` destroys them.
+Never run `docker compose down -v` unless you intend to wipe all data.
+
+Ephemeral (safe to lose): `infra_warehouse-test-data` (trend-test compose), proxy pool cache.
