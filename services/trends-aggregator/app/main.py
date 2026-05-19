@@ -392,7 +392,7 @@ async def search_trends(req: TrendSearchRequest):
     sources_used = []
     all_results: list[SourceResult] = []
 
-    async def score_and_add(source_name: str, items: list[dict], base_score: float = 50):
+    def score_and_add(source_name: str, items: list[dict], base_score: float = 50):
         for item in items:
             all_results.append(SourceResult(
                 source=source_name,
