@@ -123,6 +123,8 @@ services:
 
   trends-aggregator:
     build: ../services/trends-aggregator
+    ports:
+      - "${TRENDS_AGG_PORT:-8022}:8022"
     environment:
       - TRENDS_AGG_PORT=8022
       - SEARXNG_URL=http://searxng:8080
@@ -167,26 +169,34 @@ services:
       - bridge-net
 
 
-  yt-lab:
-    build: ../services/yt-lab
-    network_mode: host
+  # yt-lab — decoupled into services/yt-lab/ stack (docker-compose.yml there)
+  # yt-extractor: host-net :8020 (yt-dlp)
+  # yt-lab: substrate-net :8021 (orchestration)
+  # Boot with: make up yt-lab
+
+
+
+  humanizer:
+    build: ../services/humanizer
     environment:
-      - YT_LAB_PORT=8020
-      - WAREHOUSE_URL=http://localhost:8009
-      - WEB_API_URL=http://localhost:8014
-      - INFERENCE_URL=http://localhost:8005/v1/chat/completions
-      - YT_LAB_DATA=/app/data
+      - HUMANIZER_PORT=8013
+      - INFERENCE_URL=http://inference_gateway:8005/v1/chat/completions
+      - HUMANIZER_MODEL=${HUMANIZER_MODEL:-nvidia_nim:zhipuai/glm-4-9b-chat}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - inference_gateway
     volumes:
-      - ../services/yt-lab/volumes/data:/app/data
-
-
+      - ../services/humanizer/config:/app/config:ro
+    networks:
+      - substrate-net
+      - bridge-net
 
   proxy-rotator:
     build: ../services/proxy-rotator
     environment:
       - POOL_FILE=/app/data/proxy-pool.json
     volumes:
-      - ../services/proxy-rotator/data:/app/data
+      - ../services/proxy-rotator/volumes/data:/app/volumes/data
       - proxy-tor-data:/tmp/tor
     networks:
       - bridge-net

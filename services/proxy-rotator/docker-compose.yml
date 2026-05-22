@@ -1,0 +1,21 @@
+services:
+  proxy-rotator:
+    build: .
+    ports:
+      - "${PROXY_ROTATOR_PORT:-8030}:8030"
+    environment:
+      - POOL_FILE=/app/volumes/data/proxy-pool.json
+    volumes:
+      - ./volumes/data:/app/volumes/data
+      - proxy-tor-data:/tmp/tor
+    networks:
+      - bridge-net
+    restart: unless-stopped
+
+volumes:
+  proxy-tor-data:
+
+networks:
+  bridge-net:
+    external: true
+    name: infra_substrate-net

@@ -1,0 +1,15 @@
+services:
+  geo-audit:
+    build: .
+    ports:
+      - "${GEO_AUDIT_PORT:-8011}:8011"
+    environment:
+      - GEO_AUDIT_PORT=8011
+      - CRAWLER_URL=${CRAWLER_URL:-http://dss-crawler:8000}
+    networks:
+      - bridge-net
+
+networks:
+  bridge-net:
+    external: true
+    name: infra_substrate-net

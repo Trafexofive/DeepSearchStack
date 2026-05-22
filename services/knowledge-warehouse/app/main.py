@@ -381,4 +381,4 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8009)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("WAREHOUSE_PORT", "8009")))

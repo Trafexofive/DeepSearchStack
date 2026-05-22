@@ -29,7 +29,7 @@ from fastapi import FastAPI, Query
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [rotator] %(message)s")
 log = logging.getLogger("proxy-rotator")
 
-POOL_FILE = Path(os.environ.get("POOL_FILE", "/app/data/proxy-pool.json"))
+POOL_FILE = Path(os.environ.get("POOL_FILE", "/app/volumes/data/proxy-pool.json"))
 TOR_DATA = Path("/tmp/tor")
 TINYPROXY_BIN = os.environ.get("TINYPROXY_BIN", "tinyproxy")
 PRIVOXY_BIN = os.environ.get("PRIVOXY_BIN", "privoxy")
