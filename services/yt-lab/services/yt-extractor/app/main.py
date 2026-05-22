@@ -86,6 +86,20 @@ def _strip_srt(text: str) -> str:
     return "\n".join(lines)
 
 
+def _get_best_format_url(url: str, fmt: str) -> str:
+    """Get direct media URL for best video/audio format."""
+    try:
+        result = subprocess.run(
+            [YTDLP_PATH, "-f", fmt, "--get-url", "--no-playlist", url],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().split("\n")[0]
+    except Exception as e:
+        log.warning("format_url_error: %s", e)
+    return ""
+
+
 def extract_video(url: str) -> Optional[dict]:
     """Extract metadata + transcript for a single video."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -139,6 +153,8 @@ def extract_video(url: str) -> Optional[dict]:
             "transcript": transcript,
             "language": info.get("language") or "en",
             "tags": info.get("tags", []),
+            "audio_url": _get_best_format_url(url, "bestaudio"),
+            "video_url": _get_best_format_url(url, "best"),
         }
 
 

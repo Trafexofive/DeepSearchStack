@@ -36,6 +36,8 @@ data class IngestedVideo(
     val uploadDate: String,
     val transcriptPreview: String,
     val ingestedAt: String,
+    val audioUrl: String = "",
+    val videoUrl: String = "",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,9 +50,11 @@ fun LibraryScreen(
     error: String? = null,
     onSummarizeVideo: (suspend (String) -> String)? = null,
     onDeleteVideo: ((String) -> Unit)? = null,
+    onPlayAudio: ((String) -> Unit)? = null,
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var filterChannel by remember { mutableStateOf<String?>(null) }
+    var timeFilter by remember { mutableStateOf("all") } // "all", "recent", "old"
     var summaries by remember { mutableStateOf(mapOf<String, String>()) }
     var loadingSummaries by remember { mutableStateOf(setOf<String>()) }
     var deletingUrl by remember { mutableStateOf<String?>(null) }
@@ -58,10 +62,35 @@ fun LibraryScreen(
     val ctx = LocalContext.current
 
     val channels = remember(videos) { videos.map { it.channel }.distinct().sorted() }
-    val filtered = remember(videos, searchQuery, filterChannel) {
+    val filtered = remember(videos, searchQuery, filterChannel, timeFilter) {
+        val now = System.currentTimeMillis()
+        val sevenDaysMs = 7L * 24 * 60 * 60 * 1000
         videos.filter { v ->
-            (searchQuery.isEmpty() || v.title.contains(searchQuery, true) || v.channel.contains(searchQuery, true)) &&
-            (filterChannel == null || v.channel == filterChannel)
+            // Search: match title, channel, or transcript preview
+            val q = searchQuery.lowercase()
+            val matchesSearch = searchQuery.isEmpty() ||
+                v.title.lowercase().contains(q) ||
+                v.channel.lowercase().contains(q) ||
+                v.transcriptPreview.lowercase().contains(q)
+            // Channel filter
+            val matchesChannel = filterChannel == null || v.channel == filterChannel
+            // Time filter (based on ingestedAt if parseable, otherwise always include)
+            val matchesTime = when (timeFilter) {
+                "recent" -> {
+                    try {
+                        val parsed = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(v.ingestedAt.take(19))
+                        parsed?.time?.let { now - it < sevenDaysMs } ?: true
+                    } catch (_: Exception) { true }
+                }
+                "old" -> {
+                    try {
+                        val parsed = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(v.ingestedAt.take(19))
+                        parsed?.time?.let { now - it >= sevenDaysMs } ?: true
+                    } catch (_: Exception) { false }
+                }
+                else -> true
+            }
+            matchesSearch && matchesChannel && matchesTime
         }
     }
 
@@ -99,12 +128,16 @@ fun LibraryScreen(
                     )
                 }
 
-                // Channel filter chips
-                if (channels.size > 1) {
-                    item {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected = filterChannel == null, onClick = { filterChannel = null }, label = { Text("All") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentDim, selectedLabelColor = Accent))
-                            channels.take(4).forEach { ch ->
+                // Filter chips
+                item {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Time filters
+                        FilterChip(selected = timeFilter == "all", onClick = { timeFilter = "all" }, label = { Text("All") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentDim, selectedLabelColor = Accent))
+                        FilterChip(selected = timeFilter == "recent", onClick = { timeFilter = if (timeFilter == "recent") "all" else "recent" }, label = { Text("Recent") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentDim, selectedLabelColor = Accent))
+                        FilterChip(selected = timeFilter == "old", onClick = { timeFilter = if (timeFilter == "old") "all" else "old" }, label = { Text("Old") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentDim, selectedLabelColor = Accent))
+                        // Channel filters (scrollable if many)
+                        if (channels.size > 1) {
+                            channels.take(3).forEach { ch ->
                                 FilterChip(selected = filterChannel == ch, onClick = { filterChannel = if (filterChannel == ch) null else ch }, label = { Text(ch, maxLines = 1, overflow = TextOverflow.Ellipsis) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentDim, selectedLabelColor = Accent))
                             }
                         }
@@ -185,6 +218,7 @@ fun LibraryScreen(
                                     ctx.startActivity(Intent.createChooser(intent, "Share"))
                                 },
                                 onDelete = if (onDeleteVideo != null) {{ deletingUrl = video.url }} else null,
+                                onPlayAudio = if (onPlayAudio != null) {{ onPlayAudio(video.url) }} else null,
                             )
                         }
                     }
@@ -223,6 +257,7 @@ fun VideoCard(
     onSummarize: (() -> Unit)? = null,
     onShare: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
+    onPlayAudio: (() -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     Card(
@@ -270,9 +305,18 @@ fun VideoCard(
                 Icon(Icons.Filled.ChevronRight, null, tint = TextMuted, modifier = Modifier.padding(top = 4.dp))
             }
             // Action chips
-            if (onSummarize != null || onShare != null || onDelete != null) {
+            if (onSummarize != null || onShare != null || onDelete != null || onPlayAudio != null) {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (onPlayAudio != null) {
+                        Surface(onClick = onPlayAudio, shape = RoundedCornerShape(8.dp), color = Color.White.copy(alpha = 0.06f)) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.PlayArrow, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Play", color = Color(0xFF4CAF50), style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
                     if (onSummarize != null) {
                         Surface(
                             onClick = { if (!isSummarizing) onSummarize() },
@@ -331,4 +375,5 @@ fun parseIngestedVideo(json: JSONObject): IngestedVideo = IngestedVideo(
     url = json.optString("url"), title = json.optString("title", "Untitled"), channel = json.optString("channel", "Unknown"),
     duration = json.optInt("duration", 0), viewCount = json.optLong("view_count", 0), uploadDate = json.optString("upload_date", ""),
     transcriptPreview = json.optString("transcript_preview", ""), ingestedAt = json.optString("ingested_at", ""),
+    audioUrl = json.optString("audio_url", ""), videoUrl = json.optString("video_url", ""),
 )

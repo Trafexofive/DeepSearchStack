@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
@@ -197,6 +198,7 @@ fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0, onProcessUrl: (String) -> A
     var fetchError by remember { mutableStateOf<String?>(null) }
     var showPaste by remember { mutableStateOf(false) }
     var pasteText by remember { mutableStateOf("") }
+    val ctx = LocalContext.current
 
     fun refreshLibrary() {
         kotlinx.coroutines.MainScope().launch {
@@ -276,6 +278,21 @@ fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0, onProcessUrl: (String) -> A
                         kotlinx.coroutines.MainScope().launch {
                             api.deleteIngestedVideo(url)
                             refreshLibrary()
+                        }
+                    },
+                    onPlayAudio = { url ->
+                        kotlinx.coroutines.MainScope().launch {
+                            try {
+                                val meta = api.getVideoMetadata(url)
+                                val audioUrl = meta?.optString("audio_url", "") ?: ""
+                                if (audioUrl.isNotEmpty()) {
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(android.net.Uri.parse(audioUrl), "audio/*")
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    ctx.startActivity(intent)
+                                }
+                            } catch (_: Exception) {}
                         }
                     },
                 )
