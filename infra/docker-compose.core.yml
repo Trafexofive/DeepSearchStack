@@ -162,7 +162,7 @@ services:
       - BLOG_GENERATOR_URL=http://blog_generator:8006
     volumes:
       - ../services/ingest/config:/app/config:ro
-      - ../services/ingest/output:/app/output
+      - ../services/ingest/volumes/data:/app/volumes/data
       - ../services/ingest/volumes/data:/app/volumes/data
     networks:
       - substrate-net
@@ -197,7 +197,7 @@ services:
       - POOL_FILE=/app/data/proxy-pool.json
     volumes:
       - ../services/proxy-rotator/volumes/data:/app/volumes/data
-      - proxy-tor-data:/tmp/tor
+      - ../services/proxy-rotator/volumes/tor-data:/tmp/tor
     networks:
       - bridge-net
     restart: unless-stopped
@@ -208,7 +208,7 @@ services:
   redis:
     image: redis:7-alpine
     volumes:
-      - redis-data:/data
+      - ../services/event_bus/volumes/redis-data:/data
     networks:
       - substrate-net
 
@@ -229,7 +229,3 @@ networks:
   bridge-net:
     external: true
     name: infra_substrate-net
-
-volumes:
-  redis-data:
-  proxy-tor-data:

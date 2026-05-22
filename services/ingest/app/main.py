@@ -31,7 +31,7 @@ from app.publisher import generate_post, store_draft
 
 # ─── Config ────────────────────────────────────────────────
 CONFIG_PATH = os.environ.get("INGEST_CONFIG", "/app/config/feeds.yml")
-OUTPUT_DIR = Path(os.environ.get("INGEST_OUTPUT_DIR", "/app/output"))
+OUTPUT_DIR = Path(os.environ.get("INGEST_OUTPUT_DIR", "/app/volumes/data/output"))
 STATE_DIR = Path(os.environ.get("INGEST_STATE_DIR", "/app/volumes/data"))
 
 CRAWLER_URL = os.environ.get("CRAWLER_URL", "http://dss-crawler:8000")

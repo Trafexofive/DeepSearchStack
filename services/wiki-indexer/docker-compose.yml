@@ -4,8 +4,8 @@ services:
     ports:
       - "${WIKI_INDEXER_PORT:-8014}:8014"
     volumes:
-      - ./data:/app/data
-      - ./output:/app/output
+      - ./volumes/data:/app/data
+      - ./volumes/output:/app/output
     environment:
       - WIKI_DUMP_PATH=/app/data/enwiki-latest-pages-articles.xml.bz2
       - WIKI_DUMP_URL=https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2

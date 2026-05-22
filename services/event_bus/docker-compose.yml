@@ -1,4 +1,3 @@
-version: "3.8"
 services:
   event_bus:
     build: .
@@ -16,6 +15,4 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redis-data:/data
-volumes:
-  redis-data:
+      - ./volumes/redis-data:/data
