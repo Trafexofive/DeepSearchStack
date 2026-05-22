@@ -15,59 +15,129 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
-import com.substrate.ytlab.data.AppDatabase
-import com.substrate.ytlab.data.JobEntity
 import com.substrate.ytlab.network.YtLabApi
 import com.substrate.ytlab.screen.*
 import com.substrate.ytlab.ui.*
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 
 class MainActivity : ComponentActivity() {
 
     private val api = YtLabApi()
-    private lateinit var db: AppDatabase
+    private val _pendingUrl = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         createNotificationChannel()
-        db = AppDatabase.getInstance(this)
-
-        val sharedUrl = extractSharedUrl(intent)
+        _pendingUrl.value = extractSharedUrl(intent)
 
         setContent {
             YtLabTheme {
-                YtLabNavHost(
-                    api = api,
-                    db = db,
-                    initialUrl = sharedUrl,
-                    onProcessUrl = { url -> processUrl(url) },
-                )
+                var isProcessing by remember { mutableStateOf(false) }
+                var processingStatus by remember { mutableStateOf("") }
+                val snackbarHostState = remember { SnackbarHostState() }
+                var libraryRefreshKey by remember { mutableIntStateOf(0) }
+
+                fun refreshAndNotify(msg: String) {
+                    libraryRefreshKey++
+                    kotlinx.coroutines.MainScope().launch {
+                        snackbarHostState.showSnackbar(msg)
+                    }
+                }
+
+                // Provide processing callback to activity
+                val processor = remember {
+                    { url: String ->
+                        lifecycleScope.launch {
+                            isProcessing = true
+                            try {
+                                if (YtLabApi.isChannelUrl(url)) {
+                                    processingStatus = "Ingesting channel…"
+                                    val r = api.ingestChannel(url, 10)
+                                    refreshAndNotify("✅ ${r?.optInt("videos_found", 0) ?: 0} videos ingested")
+                                    showNotification("📺 Channel", "${r?.optInt("videos_found", 0) ?: 0} videos")
+                                } else if (YtLabApi.isVideoUrl(url)) {
+                                    processingStatus = "Fetching metadata…"
+                                    val meta = api.getVideoMetadata(url)
+                                    val title = meta?.optString("title", "Unknown") ?: "Unknown"
+                                    val transcript = meta?.optString("transcript", "") ?: ""
+
+                                    if (transcript.length < 100) {
+                                        refreshAndNotify("⚠️ No transcript: $title")
+                                        return@launch
+                                    }
+                                    processingStatus = "Summarizing…"
+                                    val summary = api.summarizeVideo(url, "bullet")
+                                    val text = summary?.optString("summary", summary?.optString("text", "")) ?: ""
+                                    if (text.isNotEmpty()) {
+                                        refreshAndNotify("✅ $title")
+                                        showNotification("✅ $title", text.take(200))
+                                    } else {
+                                        refreshAndNotify("❌ Summary failed: $title")
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                refreshAndNotify("❌ ${e.message ?: "Error"}")
+                            } finally {
+                                isProcessing = false
+                            }
+                        }
+                    }
+                }
+
+                Scaffold(
+                    snackbarHost = {
+                        SnackbarHost(snackbarHostState) { data ->
+                            Snackbar(snackbarData = data, containerColor = DarkCard, contentColor = TextPrimary)
+                        }
+                    },
+                ) { padding ->
+                    Box(modifier = Modifier.padding(padding)) {
+                        YtLabNavHost(api = api, refreshKey = libraryRefreshKey)
+
+                        if (isProcessing) {
+                            Surface(
+                                modifier = Modifier.fillMaxSize(),
+                                color = DarkSurface.copy(alpha = 0.90f),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        CircularProgressIndicator(color = Accent, modifier = Modifier.size(48.dp))
+                                        Spacer(Modifier.height(20.dp))
+                                        Text(processingStatus, color = TextPrimary, style = MaterialTheme.typography.bodyLarge)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Process pending URL from share intent
+                LaunchedEffect(_pendingUrl.value) {
+                    val url = _pendingUrl.value
+                    if (url != null && (YtLabApi.isVideoUrl(url) || YtLabApi.isChannelUrl(url))) {
+                        _pendingUrl.value = null
+                        processor(url)
+                    }
+                }
             }
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        val url = extractSharedUrl(intent)
-        if (url != null) {
-            lifecycleScope.launch { processUrl(url) }
+        extractSharedUrl(intent)?.let { url ->
+            _pendingUrl.value = url
         }
     }
 
@@ -76,77 +146,29 @@ class MainActivity : ComponentActivity() {
         return intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
     }
 
-    private fun processUrl(url: String) {
-        lifecycleScope.launch {
-            try {
-                val job = JobEntity(url = url, type = if (YtLabApi.isChannelUrl(url)) "channel" else "video", status = "running")
-                val jobId = withContext(Dispatchers.IO) { db.jobDao().insert(job) }
-
-                if (YtLabApi.isChannelUrl(url)) {
-                    showNotification("📺 Ingesting channel…", url.take(60))
-                    val result = api.ingestChannel(url, 10)
-                    val count = result?.optInt("count", result?.optInt("videos_found", 0) ?: 0) ?: 0
-                    withContext(Dispatchers.IO) {
-                        db.jobDao().update(job.copy(id = jobId, title = "Channel", result = "$count videos", status = "done"))
-                    }
-                    showNotification("✅ $count videos", url.take(60))
-                } else if (YtLabApi.isVideoUrl(url)) {
-                    showNotification("📹 Fetching video…", url.take(60))
-
-                    val meta = api.getVideoMetadata(url)
-                    val title = meta?.optString("title", "Unknown") ?: "Unknown"
-                    val transcript = meta?.optString("transcript", "") ?: ""
-
-                    if (transcript.length < 100) {
-                        showNotification("⚠️ No transcript", title)
-                        withContext(Dispatchers.IO) {
-                            db.jobDao().update(job.copy(id = jobId, title = title, status = "error", result = "No transcript"))
-                        }
-                        return@launch
-                    }
-
-                    showNotification("📝 Summarizing…", title)
-                    val summary = api.summarizeVideo(url, "bullet")
-                    val summaryText = summary?.optString("summary", summary?.optString("text", "Failed")) ?: "Failed"
-
-                    withContext(Dispatchers.IO) {
-                        db.jobDao().update(job.copy(id = jobId, title = title, result = summaryText, status = "done"))
-                    }
-                    showNotification("✅ $title", summaryText.take(120))
-                }
-            } catch (e: Exception) {
-                showNotification("❌ Error", e.message ?: "Unknown")
-            }
-        }
-    }
-
     private fun showNotification(title: String, body: String) {
-        val intent = Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP }
-        val pending = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val pending = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(title)
-            .setContentText(body)
+            .setContentTitle(title).setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(pending)
-            .setAutoCancel(true)
+            .setContentIntent(pending).setAutoCancel(true)
             .build()
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(title.hashCode(), notification)
+            .also { (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(title.hashCode(), it) }
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "yt-lab", NotificationManager.IMPORTANCE_HIGH)
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(channel)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .createNotificationChannel(NotificationChannel(CHANNEL_ID, "yt-lab", NotificationManager.IMPORTANCE_HIGH))
         }
     }
 
-    companion object {
-        const val CHANNEL_ID = "ytlab_jobs"
-    }
+    companion object { const val CHANNEL_ID = "ytlab_jobs" }
 }
 
 // ── Navigation ──────────────────────────────────────────────
@@ -158,17 +180,9 @@ sealed class Screen(val route: String, val icon: ImageVector, val label: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun YtLabNavHost(
-    api: YtLabApi,
-    db: AppDatabase,
-    initialUrl: String?,
-    onProcessUrl: (String) -> Unit,
-) {
+fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0) {
     val navController = rememberNavController()
-    val screens = listOf(Screen.Library, Screen.Status)
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Library) }
-
-    // Load ingested videos
     var ingestedVideos by remember { mutableStateOf(listOf<IngestedVideo>()) }
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -187,87 +201,46 @@ fun YtLabNavHost(
     }
 
     LaunchedEffect(Unit) { refreshLibrary() }
-
-    // Handle share URL
-    LaunchedEffect(initialUrl) {
-        if (initialUrl != null && YtLabApi.isVideoUrl(initialUrl)) {
-            onProcessUrl(initialUrl)
-            // Refresh library after short delay
-            kotlinx.coroutines.delay(3000)
-            refreshLibrary()
-        }
-    }
+    LaunchedEffect(refreshKey) { if (refreshKey > 0) refreshLibrary() }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("yt-lab", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = DarkSurface,
-                    titleContentColor = Accent,
-                ),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface, titleContentColor = Accent),
             )
         },
         bottomBar = {
             NavigationBar(containerColor = DarkCard) {
-                screens.forEach { screen ->
+                listOf(Screen.Library, Screen.Status).forEach { screen ->
                     NavigationBarItem(
                         selected = currentScreen == screen,
                         onClick = {
                             currentScreen = screen
                             navController.navigate(screen.route) {
                                 popUpTo(navController.graph.startDestinationId) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
+                                launchSingleTop = true; restoreState = true
                             }
                         },
                         icon = { Icon(screen.icon, screen.label) },
                         label = { Text(screen.label) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Accent,
-                            indicatorColor = AccentDim,
-                        ),
+                        colors = NavigationBarItemDefaults.colors(selectedIconColor = Accent, indicatorColor = AccentDim),
                     )
                 }
             }
         },
         containerColor = DarkSurface,
     ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = Screen.Library.route,
-            modifier = Modifier.padding(padding),
-        ) {
+        NavHost(navController = navController, startDestination = Screen.Library.route, modifier = Modifier.padding(padding)) {
             composable(Screen.Library.route) {
-                LibraryScreen(
-                    videos = ingestedVideos,
-                    onVideoClick = { video ->
-                        navController.navigate("video/${video.url.hashCode()}")
-                    },
-                    onRefresh = { refreshLibrary() },
-                    isRefreshing = isRefreshing,
-                )
+                LibraryScreen(videos = ingestedVideos, onVideoClick = { navController.navigate("video/${it.url.hashCode()}") }, onRefresh = { refreshLibrary() }, isRefreshing = isRefreshing)
             }
             composable(Screen.Status.route) {
-                StatusScreen(
-                    api = api,
-                    ingestedCount = ingestedVideos.size,
-                    onRefresh = { refreshLibrary() },
-                )
+                StatusScreen(api = api, ingestedCount = ingestedVideos.size, onRefresh = { refreshLibrary() })
             }
-            composable(
-                "video/{urlHash}",
-                arguments = listOf(navArgument("urlHash") { type = NavType.IntType }),
-            ) { backStackEntry ->
-                val urlHash = backStackEntry.arguments?.getInt("urlHash") ?: 0
-                val video = ingestedVideos.find { it.url.hashCode() == urlHash }
-                if (video != null) {
-                    VideoDetailScreen(
-                        video = video,
-                        api = api,
-                        onBack = { navController.popBackStack() },
-                    )
-                }
+            composable("video/{urlHash}", arguments = listOf(navArgument("urlHash") { type = NavType.IntType })) { backStackEntry ->
+                val hash = backStackEntry.arguments?.getInt("urlHash") ?: 0
+                ingestedVideos.find { it.url.hashCode() == hash }?.let { VideoDetailScreen(video = it, api = api, onBack = { navController.popBackStack() }) }
             }
         }
     }
