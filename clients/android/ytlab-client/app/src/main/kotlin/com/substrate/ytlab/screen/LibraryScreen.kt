@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -15,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.substrate.ytlab.ui.*
 import org.json.JSONObject
 
@@ -124,25 +126,34 @@ fun LibraryScreen(
 }
 
 @Composable
-fun VideoCard(video: IngestedVideo, onClick: () -> Unit) {
+fun VideoCard(video: IngestedVideo, onClick: () -> Unit, onSummarize: ((IngestedVideo) -> Unit)? = null) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = DarkCard),
     ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
-            Surface(shape = RoundedCornerShape(6.dp), color = AccentDim) {
-                Text(formatDuration(video.duration), Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = Accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+            // Channel avatar
+            Surface(Modifier.size(40.dp), shape = CircleShape, color = AccentDim) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(video.channel.take(1).uppercase(), color = Accent, fontWeight = FontWeight.Bold)
+                }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(video.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, color = TextPrimary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = RoundedCornerShape(5.dp), color = AccentDim) {
+                        Text(formatDuration(video.duration), Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(video.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, color = TextPrimary, modifier = Modifier.weight(1f))
+                }
                 Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(video.channel, style = MaterialTheme.typography.labelSmall, color = TextDim)
-                    Spacer(Modifier.width(8.dp)); Text("·", color = TextMuted); Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(6.dp)); Text("·", color = TextMuted); Spacer(Modifier.width(6.dp))
                     Text(formatViews(video.viewCount), style = MaterialTheme.typography.labelSmall, color = TextDim)
-                    Spacer(Modifier.width(8.dp)); Text("·", color = TextMuted); Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(6.dp)); Text("·", color = TextMuted); Spacer(Modifier.width(6.dp))
                     Text(video.uploadDate, style = MaterialTheme.typography.labelSmall, color = TextDim)
                 }
                 if (video.transcriptPreview.isNotEmpty()) {
