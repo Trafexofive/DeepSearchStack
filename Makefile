@@ -16,7 +16,7 @@ COMPOSE_FILE_PATTERN ?= $(COMPOSE_BASE_NAME)*.yml
 COMPOSE_SEARCH_DIRS ?= infra services
 COMPOSE_SEARCH_DEPTH ?= 3
 
-NETWORK_NAMES ?= substrate-net
+PRODUCTION_STACKS ?= core humanizer yt-lab
 BACKUP_DIR ?= backups
 EXPORT_DIR ?= exports
 LOG_TAIL ?= 100
@@ -764,17 +764,20 @@ port: validate-service _cache-stack
 
 .PHONY: all all-down all-restart
 
-all: ## Start all stacks
-	@$(MAKE) up core
-	@$(MAKE) up dss
+all: ## Start all production stacks
+	@for stack in $(PRODUCTION_STACKS); do \
+		$(MAKE) up $$stack; \
+	done
 
-all-down: ## Stop all stacks
-	@$(MAKE) down dss
-	@$(MAKE) down core
+all-down: ## Stop all production stacks
+	@for stack in $(PRODUCTION_STACKS); do \
+		$(MAKE) down $$stack 2>/dev/null || true; \
+	done
 
-all-restart: ## Restart all stacks
-	@$(MAKE) restart core
-	@$(MAKE) restart dss
+all-restart: ## Restart all production stacks
+	@for stack in $(PRODUCTION_STACKS); do \
+		$(MAKE) restart $$stack; \
+	done
 
 # ======================================================================================
 # UTILITIES
@@ -784,56 +787,16 @@ all-restart: ## Restart all stacks
 
 boiler-lab: ## Scaffold a new microservice: make boiler-lab NAME=my_service
 	@if [ -z "$(NAME)" ]; then \
-		echo -e "$(RED)✖ Usage: make boiler-lab NAME=<service-name>$(NC)"; \
+		echo -e "$(RED)✖ Usage: make boiler-lab NAME=<service-name> [PORT=<port>]$(NC)"; \
 		exit 1; \
 	fi
-	@echo -e "$(BLUE)🔧 Creating boilerplate for: $(NAME)$(NC)"; \
-	mkdir -p services/$(NAME)/{config,volumes/data,app}; \
-	touch services/$(NAME)/config/.gitkeep services/$(NAME)/volumes/data/.gitkeep; \
-	if [ ! -f services/$(NAME)/$(COMPOSE_BASE_NAME).yml ]; then \
-		echo 'version: "3.8"' > services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo "" >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo "services:" >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo "  $(NAME):" >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo "    build: ." >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo "    ports:" >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo '      - \"8000\"' >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo "    volumes:" >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo "      - ./config:/app/config:ro" >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo "      - ./volumes/data:/app/data" >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo "    env_file:" >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-		echo "      - ../../.env" >> services/$(NAME)/$(COMPOSE_BASE_NAME).yml; \
-	fi; \
-	if [ ! -f services/$(NAME)/Dockerfile ]; then \
-		echo "FROM python:3.12-slim" > services/$(NAME)/Dockerfile; \
-		echo "" >> services/$(NAME)/Dockerfile; \
-		echo "WORKDIR /app" >> services/$(NAME)/Dockerfile; \
-		echo "COPY app/ ." >> services/$(NAME)/Dockerfile; \
-		echo "RUN pip install -r requirements.txt" >> services/$(NAME)/Dockerfile; \
-		echo "CMD [\"python\", \"main.py\"]" >> services/$(NAME)/Dockerfile; \
-	fi; \
-	if [ ! -f services/$(NAME)/requirements.txt ]; then \
-		echo "fastapi" > services/$(NAME)/requirements.txt; \
-		echo "uvicorn" >> services/$(NAME)/requirements.txt; \
-		echo "pydantic" >> services/$(NAME)/requirements.txt; \
-	fi; \
-	if [ ! -f services/$(NAME)/app/main.py ]; then \
-		echo '"""$(NAME) — Substrate service"""' > services/$(NAME)/app/main.py; \
-		echo "def main():" >> services/$(NAME)/app/main.py; \
-		echo '    print(\"$(NAME) service starting...\")' >> services/$(NAME)/app/main.py; \
-		echo "" >> services/$(NAME)/app/main.py; \
-		echo 'if __name__ == \"__main__\":' >> services/$(NAME)/app/main.py; \
-		echo "    main()" >> services/$(NAME)/app/main.py; \
-	fi; \
-	echo -e "$(GREEN)✅ Created: services/$(NAME)/$(NC)"; \
-	echo -e "$(GRAY)  Files: docker-compose.yml, Dockerfile, requirements.txt, app/main.py, config/, volumes/$(NC)"
+	@python3 scripts/boiler-lab.py "$(NAME)" $(if $(PORT),--port $(PORT),)
 
 test-parse:
 	@echo -e "$(CYAN)=== Parser Test ===$(NC)"
 	@echo "MAKECMDGOALS  : $(MAKECMDGOALS)"
 	@echo "_ALL_GOALS    : $(_ALL_GOALS)"
 	@echo "_TARGET       : $(_TARGET)"
-	@echo "_REST         : $(_REST)"
 	@echo "STACK_PATH    : $(STACK_PATH)"
 	@echo "STACK         : $(STACK)"
 	@echo "SERVICE       : $(SERVICE)"
@@ -918,19 +881,21 @@ help:
 	@echo -e "  test-parse <stack>[/svc] - Debug parser"
 	@echo ""
 	@echo -e "$(YELLOW)Examples:$(NC)"
-	@echo -e "  make all                         # Start entire substrate (core + 4 services)"
-	@echo -e "  make up core                     # Start core stack (all services + redis + nginx)"
-	@echo -e "  make up core/api_gateway         # Start specific service"
-	@echo -e "  make logs core                   # Follow all logs"
-	@echo -e "  make logs core/api_gateway LOG_TAIL=500"
-	@echo -e "  make top core                    # Live resource monitor"
-	@echo -e "  make status core                 # Show container status"
-	@echo -e "  make shell core/api_gateway      # Interactive shell into api_gateway"
-	@echo -e "  make backup core                 # Backup compose file + volumes"
-	@echo -e "  make vol-backup core/redis-data"
-	@echo -e "  make rebuild core                # Rebuild all images (no cache)"
-	@echo -e "  make health core                 # Health check report"
-	@echo -e "  make VERBOSE=1 up core           # Verbose mode"
+	@echo -e "  make all                                  # Start all production stacks ($(PRODUCTION_STACKS))"
+	@echo -e "  make up core                              # Start core stack (api_gateway, inference, redis, nginx, ...)"
+	@echo -e "  make up humanizer                         # Start humanizer service"
+	@echo -e "  make up yt-lab                            # Start yt-lab stack (extractor + lab)"
+	@echo -e "  make up core/api_gateway                  # Start specific service"
+	@echo -e "  make logs core                            # Follow all logs"
+	@echo -e "  make logs core/blog_generator LOG_TAIL=500"
+	@echo -e "  make top core                             # Live resource monitor"
+	@echo -e "  make list-stacks                          # Dashboard of all stacks"
+	@echo -e "  make list-services core                   # Detailed per-service info"
+	@echo -e "  make shell core/api_gateway               # Interactive shell"
+	@echo -e "  make backup core                          # Backup compose file + volumes"
+	@echo -e "  make rebuild core                         # Rebuild all images (no cache)"
+	@echo -e "  make health core                          # Health check report"
+	@echo -e "  make VERBOSE=1 up core                    # Verbose mode"
 	@echo ""
 	@echo -e "$(YELLOW)Configuration (override in .env):$(NC)"
 	@echo -e "  PROJECT_NAME=$(PROJECT_NAME)"
@@ -938,9 +903,10 @@ help:
 	@echo -e "  COMPOSE_SEARCH_DIRS=$(COMPOSE_SEARCH_DIRS)"
 	@echo -e "  NETWORK_NAMES=$(NETWORK_NAMES)"
 	@echo -e "  VERBOSE=$(VERBOSE)  (set to 1 for debug output)"
-	@echo -e "$(YELLOW)Core services:$(NC)"
-	@echo -e "  api_gateway (8000) · workflow_engine (8001) · llm_gateway (8002) · event_bus (8003)"
-	@echo -e "  redis · nginx"
+	@echo -e "$(YELLOW)Production stacks ($(PRODUCTION_STACKS)):$(NC)"
+	@echo -e "  core      — api_gateway, inference-gateway, blog_generator, event_bus, ..."
+	@echo -e "  humanizer — text humanization (port 8013)"
+	@echo -e "  yt-lab    — YouTube automation stack (extractor :8020 + lab :8021)"
 	@echo ""
 	@echo -e "$(GRAY)Cache file: $(CACHE_FILE) (stores last-used stack)$(NC)"
 	@echo -e "$(BLUE)=========================================================================$(NC)"
