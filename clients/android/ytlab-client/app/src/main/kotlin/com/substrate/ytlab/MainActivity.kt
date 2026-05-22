@@ -185,17 +185,25 @@ fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Library) }
     var ingestedVideos by remember { mutableStateOf(listOf<IngestedVideo>()) }
     var isRefreshing by remember { mutableStateOf(false) }
+    var fetchError by remember { mutableStateOf<String?>(null) }
 
     fun refreshLibrary() {
         kotlinx.coroutines.MainScope().launch {
             isRefreshing = true
+            fetchError = null
             try {
                 val data = api.getIngestedVideos()
-                val arr = data?.optJSONArray("videos")
-                if (arr != null) {
-                    ingestedVideos = (0 until arr.length()).map { i -> parseIngestedVideo(arr.getJSONObject(i)) }
+                if (data == null) {
+                    fetchError = "yt-lab unreachable — is the host running?"
+                } else {
+                    val arr = data.optJSONArray("videos")
+                    if (arr != null) {
+                        ingestedVideos = (0 until arr.length()).map { i -> parseIngestedVideo(arr.getJSONObject(i)) }
+                    }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                fetchError = "Connection error: ${e.message?.take(60)}"
+            }
             isRefreshing = false
         }
     }
@@ -233,7 +241,7 @@ fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0) {
     ) { padding ->
         NavHost(navController = navController, startDestination = Screen.Library.route, modifier = Modifier.padding(padding)) {
             composable(Screen.Library.route) {
-                LibraryScreen(videos = ingestedVideos, onVideoClick = { navController.navigate("video/${it.url.hashCode()}") }, onRefresh = { refreshLibrary() }, isRefreshing = isRefreshing)
+                LibraryScreen(videos = ingestedVideos, onVideoClick = { navController.navigate("video/${it.url.hashCode()}") }, onRefresh = { refreshLibrary() }, isRefreshing = isRefreshing, error = fetchError)
             }
             composable(Screen.Status.route) {
                 StatusScreen(api = api, ingestedCount = ingestedVideos.size, onRefresh = { refreshLibrary() })

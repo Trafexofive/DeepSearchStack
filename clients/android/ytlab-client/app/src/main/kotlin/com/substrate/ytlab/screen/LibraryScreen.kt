@@ -35,6 +35,7 @@ fun LibraryScreen(
     onVideoClick: (IngestedVideo) -> Unit,
     onRefresh: () -> Unit,
     isRefreshing: Boolean,
+    error: String? = null,
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var filterChannel by remember { mutableStateOf<String?>(null) }
@@ -48,6 +49,26 @@ fun LibraryScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // Error banner
+        if (error != null) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = AccentDim,
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.ErrorOutline, null, tint = Accent, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(error, color = Accent, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onRefresh) {
+                        Text("Retry", color = Accent)
+                    }
+                }
+            }
+        }
+
         // Search bar
         OutlinedTextField(
             value = searchQuery,
@@ -110,10 +131,15 @@ fun LibraryScreen(
         if (filtered.isEmpty() && !isRefreshing) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Filled.VideoLibrary, null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                    Icon(
+                        if (error != null) Icons.Filled.CloudOff else Icons.Filled.VideoLibrary,
+                        null, tint = TextMuted, modifier = Modifier.size(64.dp),
+                    )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        if (videos.isEmpty()) "No videos ingested yet" else "No results",
+                        if (error != null) "Could not connect to yt-lab"
+                        else if (videos.isEmpty()) "No videos ingested yet"
+                        else "No results",
                         color = TextDim,
                     )
                     if (videos.isEmpty()) {
