@@ -261,7 +261,7 @@ metrics = MetricsTracker()
 
 @dataclass
 class HumanizeResult:
-    text: str
+    text: str = ""
     model: str = ""
     pass1_tokens: int = 0
     pass2_tokens: int = 0
