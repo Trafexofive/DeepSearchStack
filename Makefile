@@ -201,6 +201,14 @@ validate-config: validate-stack
 # CORE OPERATIONS
 # ======================================================================================
 
+.PHONY: u d b l s r
+u: up
+d: down
+b: build
+l: logs
+s: status
+r: restart
+
 .PHONY: setup create-networks up down restart stop start
 
 setup: validate-stack
@@ -210,7 +218,6 @@ up: validate-service setup _cache-stack
 	@echo -e "$(BLUE)🚀 Starting: $(STACK)$(if $(SERVICE), [$(SERVICE)],)$(NC)"
 	@$(COMPOSE) up -d $(SERVICE_FLAG)
 	@echo -e "$(GREEN)✅ Stack running$(NC)"
-	@$(MAKE) --no-print-directory list-stacks
 
 down: validate-stack _cache-stack
 	@echo -e "$(YELLOW)🛑 Stopping: $(STACK)$(if $(SERVICE), [$(SERVICE)],)$(NC)"
@@ -221,7 +228,6 @@ down: validate-stack _cache-stack
 		$(COMPOSE) down --remove-orphans; \
 	fi
 	@echo -e "$(GREEN)✅ Stopped$(NC)"
-	@$(MAKE) --no-print-directory list-stacks
 
 restart: validate-service _cache-stack
 	@echo -e "$(BLUE)♻️  Restarting: $(STACK)$(if $(SERVICE), [$(SERVICE)],)$(NC)"
@@ -260,6 +266,17 @@ pull: validate-service _cache-stack
 re: build restart
 
 rere: rebuild restart
+
+bounce: validate-service _cache-stack
+	@echo -e "$(BLUE)🏓 Bouncing: $(STACK)$(if $(SERVICE), [$(SERVICE)],)$(NC)"
+	@$(COMPOSE) up -d --force-recreate $(SERVICE_FLAG)
+	@echo -e "$(GREEN)✅ Bounce complete$(NC)"
+
+rebounce: validate-service _cache-stack
+	@echo -e "$(BLUE)🏓 Rebouncing (rebuild): $(STACK)$(if $(SERVICE), [$(SERVICE)],)$(NC)"
+	@$(COMPOSE) build --no-cache $(SERVICE_FLAG)
+	@$(COMPOSE) up -d --force-recreate $(SERVICE_FLAG)
+	@echo -e "$(GREEN)✅ Rebounce complete$(NC)"
 
 recreate: validate-service _cache-stack
 	@echo -e "$(BLUE)🔄 Recreating: $(STACK)$(if $(SERVICE), [$(SERVICE)],)$(NC)"
@@ -336,20 +353,19 @@ shell: validate-service _cache-stack
 
 exec: validate-service _cache-stack
 	@if [ -z "$(SERVICE)" ]; then \
-		echo -e "$(RED)✖ Usage: make exec <stack>/<service> \"<command>\"$(NC)"; \
+		echo -e "$(RED)✖ Usage: make exec <stack>/<service> CMD='<command>'$(NC)"; \
+		echo -e "$(YELLOW)Example: make exec core/nginx CMD='nginx -t'$(NC)"; \
 		exit 1; \
 	fi
-	@# Extract command from remaining arguments after stack/service
-	@cmd="$(wordlist 3,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))"; \
-	if [ -z "$cmd" ]; then \
-		echo -e "$(RED)✖ Usage: make exec <stack>/<service> \"<command>\"$(NC)"; \
-		echo -e "$(YELLOW)Example: make exec core/nginx \"nginx -t\"$(NC)"; \
+	@if [ -z "$(CMD)" ]; then \
+		echo -e "$(RED)✖ Usage: make exec <stack>/<service> CMD='<command>'$(NC)"; \
+		echo -e "$(YELLOW)Example: make exec core/nginx CMD='nginx -t'$(NC)"; \
 		exit 1; \
-	fi; \
-	if [ "$(VERBOSE)" = "1" ]; then \
-		echo -e "$(GRAY)[DEBUG] Executing in $(SERVICE): $cmd$(NC)"; \
-	fi; \
-	$(COMPOSE) exec $(SERVICE) sh -c "$cmd"
+	fi
+	@if [ "$(VERBOSE)" = "1" ]; then \
+		echo -e "$(GRAY)[DEBUG] Executing in $(SERVICE): $(CMD)$(NC)"; \
+	fi
+	@$(COMPOSE) exec $(SERVICE) sh -c "$(CMD)"
 
 # ======================================================================================
 # BACKUP
@@ -398,6 +414,7 @@ clean: validate-stack _cache-stack
 fclean: validate-stack _cache-stack
 	@echo -e "$(RED)🧹 Full clean (including volumes): $(STACK)$(NC)"
 	@$(COMPOSE) down --volumes --remove-orphans
+	@echo -e "$(GREEN)✅ Full clean complete$(NC)"
 	@echo -e "$(GREEN)✅ Full clean complete$(NC)"
 
 prune: fclean
@@ -783,6 +800,36 @@ all-restart: ## Restart all production stacks
 
 .PHONY: boiler-lab test-parse
 
+.PHONY: boiler-lab test-parse onboard port-map networks
+
+onboard: ## First-run setup: validate all production stacks
+	@echo -e "$(BLUE)🚀 Onboarding — validating all production stacks...$(NC)"
+	@for stack in $(PRODUCTION_STACKS); do \
+		echo -e "$(GRAY)  Checking $$stack...$(NC)"; \
+		$(MAKE) validate-config $$stack 2>&1 | grep -E "✅|✖" || true; \
+	done
+	@echo -e "$(GREEN)✅ Onboard complete. Run 'make all' to start everything.$(NC)"
+
+port-map: ## Show port assignments for all services
+	@echo -e "$(CYAN)Port Map:$(NC)"
+	@for dir in $(COMPOSE_SEARCH_DIRS); do \
+		if [ ! -d "$$dir" ]; then continue; fi; \
+		find "$$dir" -maxdepth $(COMPOSE_SEARCH_DEPTH) -name "$(COMPOSE_BASE_NAME)*.yml" 2>/dev/null | while read f; do \
+			docker compose -f "$$f" config --format json 2>/dev/null | jq -r '.services | to_entries[]? | "  " + .key + ": " + (.value.ports // [] | map("\(.published // "?")->\(.target)") | join(", "))' 2>/dev/null || true; \
+		done; \
+	done | sort -u
+
+networks: ## Create required Docker networks
+	@echo -e "$(BLUE)🌐 Creating networks...$(NC)"
+	@for net in infra_substrate-net bridge-net; do \
+		if docker network inspect $$net >/dev/null 2>&1; then \
+			echo -e "  $(GREEN)●$(NC) $$net $(GRAY)(exists)$(NC)"; \
+		else \
+			docker network create $$net >/dev/null 2>&1; \
+			echo -e "  $(BLUE)●$(NC) $$net $(GRAY)(created)$(NC)"; \
+		fi; \
+	done
+
 boiler-lab: ## Scaffold a new microservice: make boiler-lab NAME=my_service
 	@if [ -z "$(NAME)" ]; then \
 		echo -e "$(RED)✖ Usage: make boiler-lab NAME=<service-name> [PORT=<port>]$(NC)"; \
@@ -826,11 +873,16 @@ help:
 	@echo -e "  down <stack>[/service]   - Stop and remove"
 	@echo -e "  restart <stack>[/service]- Restart"
 	@echo -e "  stop/start <stack>[/svc] - Stop/start without removing"
+	@echo -e "  bounce <stack>[/svc]     - Force recreate (faster than down+up)"
+	@echo -e "  rebounce <stack>[/svc]   - Rebuild + force recreate"
 	@echo -e "  build <stack>[/service]  - Build images (cached)"
 	@echo -e "  rebuild <stack>[/svc]    - Build images (no-cache)"
 	@echo -e "  pull <stack>[/service]   - Pull latest images"
-	@echo -e "  re/rere <stack>[/svc]    - Build and restart"
+	@echo -e "  re/rere <stack>[/svc]    - Build and restart (aliases for bounce/rebounce)"
 	@echo -e "  recreate <stack>[/svc]   - Force recreate containers"
+	@echo ""
+	@echo -e "$(GREEN)Short Aliases:$(NC)"
+	@echo -e "  u=up  d=down  b=build  l=logs  s=status  r=restart"
 	@echo ""
 	@echo -e "$(GREEN)Monitoring:$(NC)"
 	@echo -e "  logs <stack>[/service]   - Follow logs (LOG_TAIL=N)"
@@ -875,8 +927,11 @@ help:
 	@echo -e "  prune                    - System-wide prune"
 	@echo ""
 	@echo -e "$(GREEN)Utilities:$(NC)"
-	@echo -e "  boiler-lab NAME=<name>   - Create service boilerplate (compose + Dockerfile + FastAPI stub)"
-	@echo -e "  test-parse <stack>[/svc] - Debug parser"
+	@echo -e "  onboard                  - First-run setup (validate all stacks)"
+	@echo -e "  boiler-lab NAME=<name>   - Scaffold new service from template"
+	@echo -e "  port-map                 - Show port assignments"
+	@echo -e "  networks                 - Create required Docker networks"
+	@echo -e "  test-parse <stack>[/svc] - Debug path parser"
 	@echo ""
 	@echo -e "$(YELLOW)Examples:$(NC)"
 	@echo -e "  make all                                  # Start all production stacks ($(PRODUCTION_STACKS))"
@@ -900,7 +955,6 @@ help:
 	@echo -e "  PROJECT_NAME=$(PROJECT_NAME)"
 	@echo -e "  COMPOSE_BASE_NAME=$(COMPOSE_BASE_NAME)"
 	@echo -e "  COMPOSE_SEARCH_DIRS=$(COMPOSE_SEARCH_DIRS)"
-	@echo -e "  NETWORK_NAMES=$(NETWORK_NAMES)"
 	@echo -e "  VERBOSE=$(VERBOSE)  (set to 1 for debug output)"
 	@echo -e "$(YELLOW)Production stacks ($(PRODUCTION_STACKS)):$(NC)"
 	@echo -e "  core      — api_gateway, inference-gateway, blog_generator, event_bus, ..."
