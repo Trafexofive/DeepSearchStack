@@ -40,6 +40,9 @@ services:
   knowledge_bridge:
     port: 8010
 
+  wiki_indexer:
+    port: 8014
+
   geo_audit:
     port: 8011
 
@@ -49,8 +52,15 @@ services:
   trends_aggregator:
     port: 8022
 
+  humanizer:
+    port: 8013
+    model: ${HUMANIZER_MODEL:-nvidia_nim:zhipuai/glm-4-9b-chat}
+    inference_url: http://inference_gateway:8005/v1/chat/completions
+
+  # yt-lab stack — see services/yt-lab/docker-compose.yml
   yt_lab:
-    port: 8020
+    port: 8021
+    extractor_port: 8020
 
   sub_mq:
     port: 8012

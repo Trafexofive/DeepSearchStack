@@ -13,6 +13,6 @@ COPY . .
 
 RUN mkdir -p /app/data /app/output
 
-EXPOSE 8010
+EXPOSE 8014
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8014"]
