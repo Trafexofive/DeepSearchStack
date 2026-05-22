@@ -1,8 +1,10 @@
 import asyncio
 import time
+import json
+import re
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from crawl4ai import AsyncWebCrawler
 from crawl4ai.extraction_strategy import LLMExtractionStrategy, JsonCssExtractionStrategy
 import uvicorn
@@ -18,8 +20,25 @@ class CrawlResponse(BaseModel):
     url: str
     content: str
     extracted_data: Optional[Dict[str, Any]] = None
+    json_ld: Optional[List[Dict[str, Any]]] = None
     success: bool
     error_message: Optional[str] = None
+
+
+def _extract_json_ld(html: str) -> Optional[List[Dict[str, Any]]]:
+    """Extract JSON-LD script blocks from raw HTML."""
+    pattern = r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>'
+    matches = re.findall(pattern, html, re.DOTALL | re.IGNORECASE)
+    if not matches:
+        return None
+    results = []
+    for match in matches:
+        try:
+            results.append(json.loads(match.strip()))
+        except json.JSONDecodeError:
+            continue
+    return results if results else None
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -56,7 +75,7 @@ async def crawl_url(request: CrawlRequest):
             result = await app.state.crawler.arun(url=request.url)
         
         if result.success:
-            # Extract content properly
+            # Extract markdown content
             content = ""
             if hasattr(result, 'markdown_v2') and result.markdown_v2:
                 content = result.markdown_v2.text
@@ -69,11 +88,18 @@ async def crawl_url(request: CrawlRequest):
             extracted_data = None
             if hasattr(result, 'extracted_content') and result.extracted_content:
                 extracted_data = result.extracted_content
+
+            # Extract JSON-LD from raw HTML
+            json_ld = None
+            raw_html = getattr(result, 'html', '') or getattr(result, 'cleaned_html', '') or ''
+            if raw_html:
+                json_ld = _extract_json_ld(raw_html)
             
             return CrawlResponse(
                 url=request.url,
                 content=content,
                 extracted_data=extracted_data,
+                json_ld=json_ld,
                 success=True
             )
         else:
