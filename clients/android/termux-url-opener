@@ -1,0 +1,266 @@
+#!/data/data/com.termux/files/usr/bin/python3
+"""yt-lab Android share handler — Termux URL opener.
+
+Receives shared YouTube URLs via Android share intent and sends them
+to yt-lab running on the host machine (reachable via ADB reverse).
+
+Setup:
+  1. In Termux: pkg install python curl termux-api
+  2. Place this at: ~/bin/termux-url-opener
+  3. chmod +x ~/bin/termux-url-opener
+  4. Share any YouTube URL → select Termux
+
+ADB reverse (run on host after booting yt-lab):
+  adb reverse tcp:8020 tcp:8020  # yt-extractor
+  adb reverse tcp:8021 tcp:8021  # yt-lab orchestrator
+"""
+
+import json
+import os
+import subprocess
+import sys
+import urllib.parse
+
+YT_LAB = "http://localhost:8021"
+
+VIDEO_PATTERNS = [
+    "youtube.com/watch",
+    "youtu.be/",
+    "youtube.com/shorts/",
+    "m.youtube.com/watch",
+    "youtube.com/live/",
+]
+
+CHANNEL_PATTERNS = [
+    "youtube.com/@",
+    "youtube.com/channel/",
+    "youtube.com/c/",
+]
+
+
+def notify(title: str, body: str = ""):
+    """Send Android notification via termux-notification."""
+    subprocess.run([
+        "termux-notification",
+        "--title", title,
+        "--content", body,
+        "--priority", "high",
+        "--id", "ytlab",
+    ], capture_output=True)
+
+
+def notify_progress(msg: str):
+    subprocess.run([
+        "termux-notification",
+        "--title", "🔍 yt-lab",
+        "--content", msg,
+        "--priority", "default",
+        "--id", "ytlab",
+        "--ongoing",
+    ], capture_output=True)
+
+
+def notify_done(msg: str, action_title: str = "", action_url: str = ""):
+    args = [
+        "termux-notification",
+        "--title", "✅ yt-lab",
+        "--content", msg,
+        "--priority", "high",
+        "--id", "ytlab",
+        "--vibrate", "200",
+    ]
+    if action_title and action_url:
+        args += [
+            "--action", f'{action_title};{action_url}',
+        ]
+    subprocess.run(args, capture_output=True)
+
+
+def is_youtube(url: str) -> bool:
+    return any(p in url for p in VIDEO_PATTERNS + CHANNEL_PATTERNS)
+
+
+def is_channel(url: str) -> bool:
+    return any(p in url for p in CHANNEL_PATTERNS)
+
+
+def is_video(url: str) -> bool:
+    return any(p in url for p in VIDEO_PATTERNS)
+
+
+def curl_get(path: str) -> dict:
+    """GET request to yt-lab, return JSON."""
+    result = subprocess.run(
+        ["curl", "-s", f"{YT_LAB}{path}"],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        return {"error": f"curl failed: {result.stderr or 'unknown'}"}
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"error": f"parse error: {result.stdout[:200]}"}
+
+
+def curl_post(path: str, data: dict) -> dict:
+    """POST request to yt-lab."""
+    result = subprocess.run(
+        ["curl", "-s", "-X", "POST", f"{YT_LAB}{path}",
+         "-H", "Content-Type: application/json",
+         "-d", json.dumps(data)],
+        capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode != 0:
+        return {"error": f"curl failed: {result.stderr or 'unknown'}"}
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"error": f"parse error: {result.stdout[:200]}"}
+
+
+def handle_video(url: str):
+    """Extract metadata + offer to summarize."""
+    encoded = urllib.parse.quote(url, safe="")
+
+    # Step 1: Quick metadata
+    notify_progress("Fetching video metadata...")
+    meta = curl_get(f"/videos/metadata?video_url={encoded}")
+
+    if "error" in meta:
+        notify("❌ Failed", meta["error"])
+        return
+
+    title = meta.get("title", "Unknown")
+    channel = meta.get("channel", "Unknown")
+    duration = meta.get("duration", 0)
+    has_transcript = bool(meta.get("transcript"))
+    transcript_len = len(meta.get("transcript", "")) if has_transcript else 0
+
+    mins = int(duration // 60)
+    secs = int(duration % 60)
+
+    notify(
+        f"📹 {title}",
+        f"{channel} · {mins}:{secs:02d} · {transcript_len} chars transcript"
+    )
+
+    if not has_transcript or transcript_len < 100:
+        notify_done(f"No transcript available for: {title}")
+        return
+
+    # Step 2: Summarize
+    notify_progress("Summarizing...")
+    summary = curl_post("/videos/summarize", {
+        "video_url": url,
+        "style": "bullet",
+        "humanize": False,
+    })
+
+    if "error" in summary:
+        notify_done(f"Failed to summarize: {summary['error']}")
+        return
+
+    summary_text = summary.get("summary", summary.get("text", str(summary)))
+
+    lines = summary_text.strip().split("\n")
+    short = "\n".join(lines[:5])
+    if len(lines) > 5:
+        short += f"\n... ({len(lines)} lines total)"
+
+    notify_done(
+        f"✅ {title}\n{short}",
+        action_title="📋 Copy summary",
+        action_url=f"echo '{summary_text[:500]}' | termux-clipboard-set",
+    )
+
+    # Save full summary to file
+    home = os.path.expanduser("~")
+    outdir = os.path.join(home, "yt-lab-summaries")
+    os.makedirs(outdir, exist_ok=True)
+    safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:50]
+    outpath = os.path.join(outdir, f"{safe_title}.txt")
+    with open(outpath, "w") as f:
+        f.write(f"# {title}\n# {channel}\n# {url}\n\n{summary_text}")
+    subprocess.run(["termux-notification", "--title", "📁 Saved", "--content", outpath])
+
+
+def handle_channel(url: str):
+    """Ingest channel videos."""
+    notify_progress("Fetching channel videos...")
+    encoded = urllib.parse.quote(url, safe="")
+
+    result = curl_post("/channels/ingest", {
+        "channel_url": url,
+        "limit": 10,
+    })
+
+    if "error" in result:
+        notify("❌ Failed", result["error"])
+        return
+
+    count = result.get("count", 0)
+    video_urls = result.get("video_urls", [])
+
+    notify(
+        f"📺 Channel ingested",
+        f"{count} videos found"
+    )
+
+    # Report first few
+    lines = []
+    for u in video_urls[:5]:
+        vid_id = u.split("v=")[-1] if "v=" in u else u.split("/")[-1]
+        lines.append(f"• {vid_id}")
+    if len(video_urls) > 5:
+        lines.append(f"... and {len(video_urls) - 5} more")
+
+    notify_done(f"📺 {count} videos ready\n" + "\n".join(lines))
+
+
+def handle_watch(url: str):
+    """Add channel to watch list."""
+    encoded = urllib.parse.quote(url, safe="")
+    notify_progress("Adding to watch list...")
+
+    result = curl_post("/channels/watch", {"channel_url": url})
+
+    if "error" in result:
+        notify("❌ Failed", result["error"])
+        return
+
+    notify_done(f"👁️ Channel added to watch list\n{url}")
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: termux-url-opener <url>")
+        sys.exit(1)
+
+    url = sys.argv[1].strip()
+
+    if not is_youtube(url):
+        notify("❌ Not a YouTube URL", url[:100])
+        sys.exit(0)
+
+    notify_progress("Connecting to yt-lab...")
+
+    # Quick health check
+    health = curl_get("/health")
+    if "error" in health:
+        notify("❌ yt-lab unreachable", "Is the host running? ADB reverse active?")
+        sys.exit(1)
+
+    if is_channel(url):
+        # Check for intent extras
+        if "WATCH" in (sys.argv[3] if len(sys.argv) > 3 else ""):
+            handle_watch(url)
+        else:
+            handle_channel(url)
+    elif is_video(url):
+        handle_video(url)
+    else:
+        notify("❌ Unknown URL type", url)
+
+
+if __name__ == "__main__":
+    main()
