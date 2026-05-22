@@ -1,0 +1,14 @@
+services:
+  dashboard:
+    build: .
+    ports:
+      - "${DASHBOARD_PORT:-8015}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - substrate-net
+
+networks:
+  substrate-net:
+    external: true
+    name: infra_substrate-net
