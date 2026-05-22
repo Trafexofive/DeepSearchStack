@@ -48,6 +48,8 @@ services:
 
   inference_gateway:
     build: ../services/inference-gateway
+    ports:
+      - "${INFERENCE_PORT:-8005}:8005"
     environment:
       - INFERENCE_GATEWAY_PORT=8005
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
@@ -64,7 +66,7 @@ services:
       - "${BLOG_GEN_PORT:-8006}:8006"
     environment:
       - BLOG_GENERATOR_PORT=8006
-      - WAREHOUSE_URL=http://dss-knowledge-warehouse:8009
+      - WAREHOUSE_URL=http://knowledge_warehouse:8009
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - TRACKER_DB=/app/data/tracker.db
     depends_on:
@@ -94,12 +96,25 @@ services:
       - BRIDGE_PORT=8010
       - DEEPSEARCH_URL=http://dss-deepsearch:8001
       - WEB_API_URL=http://dss-web-api:8014
-      - WAREHOUSE_URL=http://dss-knowledge-warehouse:8009
+      - WAREHOUSE_URL=http://knowledge-warehouse:8009
       - CRAWLER_URL=http://dss-crawler:8000
       - BLOG_GENERATOR_URL=http://blog_generator:8006
     networks:
       - substrate-net
       - bridge-net
+
+  knowledge_warehouse:
+    build: ../services/knowledge-warehouse
+    ports:
+      - "${WAREHOUSE_PORT:-8009}:8009"
+    environment:
+      - WAREHOUSE_PORT=8009
+      - WAREHOUSE_DATA=/app/data
+    volumes:
+      - ../services/knowledge-warehouse/volumes/data:/app/data
+      - ../services/knowledge-warehouse/config:/app/config:ro
+    networks:
+      - substrate-net
 
   geo_audit:
     build: ../services/geo-audit
@@ -180,6 +195,8 @@ services:
 
   humanizer:
     build: ../services/humanizer
+    ports:
+      - "${HUMANIZER_PORT:-8013}:8013"
     environment:
       - HUMANIZER_PORT=8013
       - INFERENCE_URL=http://inference_gateway:8005/v1/chat/completions

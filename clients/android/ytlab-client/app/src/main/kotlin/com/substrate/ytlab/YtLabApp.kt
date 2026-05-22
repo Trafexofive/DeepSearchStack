@@ -94,6 +94,40 @@ fun YtLabApp(
         LaunchedEffect(Unit) {
             snapshot = fetchSnapshot(blogApi, api)
             snapshotLoading = false
+            // Also load ingested from yt-lab
+            try {
+                val ingested = withContext(Dispatchers.IO) {
+                    val conn = URL("http://localhost:8021/videos/ingested?limit=100").openConnection() as HttpURLConnection
+                    conn.connectTimeout = 5000
+                    conn.readTimeout = 5000
+                    if (conn.responseCode in 200..299) {
+                        val text = BufferedReader(InputStreamReader(conn.inputStream)).readText()
+                        conn.disconnect()
+                        JSONObject(text).optJSONArray("videos")
+                    } else null
+                }
+                if (ingested != null && ingested.length() > 0) {
+                    val dao = db.jobDao()
+                    for (i in 0 until ingested.length()) {
+                        val v = ingested.optJSONObject(i) ?: continue
+                        val url = v.optString("url")
+                        val existing = withContext(Dispatchers.IO) { dao.getAll() }.find { it.url == url }
+                        if (existing == null) {
+                            withContext(Dispatchers.IO) {
+                                dao.insert(JobEntity(
+                                    url = url,
+                                    type = "video",
+                                    title = v.optString("title", "Untitled"),
+                                    channel = v.optString("channel", ""),
+                                    result = v.optString("transcript_preview", ""),
+                                    status = "done",
+                                    createdAt = System.currentTimeMillis(),
+                                ))
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
         }
 
         // Refresh jobs when returning to app

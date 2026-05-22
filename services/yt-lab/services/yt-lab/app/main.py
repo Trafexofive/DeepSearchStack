@@ -83,6 +83,32 @@ class WatchingChannel(BaseModel):
 
 watching: dict[str, WatchingChannel] = {}
 _watch_task: Optional[asyncio.Task] = None
+_ingested_videos: list[dict] = []
+_local_store_path: Path | None = None
+
+
+def _load_local_store():
+    """Load ingested videos from local JSON file."""
+    global _ingested_videos, _local_store_path
+    _local_store_path = DATA_DIR / "ingested.json"
+    if _local_store_path.exists():
+        try:
+            _ingested_videos = json.loads(_local_store_path.read_text())
+            log.info("loaded %d ingested videos from local store", len(_ingested_videos))
+        except Exception as e:
+            log.warning("failed loading local store: %s", e)
+            _ingested_videos = []
+
+
+def _save_local_store():
+    if _local_store_path:
+        _local_store_path.parent.mkdir(parents=True, exist_ok=True)
+        _local_store_path.write_text(json.dumps(_ingested_videos, default=str))
+
+
+@app.on_event("startup")
+async def startup():
+    _load_local_store()
 
 
 # ─── Extractor client ─────────────────────────────────────────
@@ -117,10 +143,32 @@ async def _list_channel(url: str, limit: int = 20) -> list[str]:
 # ─── Warehouse helpers ────────────────────────────────────────
 
 async def _store_in_warehouse(data: dict) -> bool:
-    """Store video transcript in warehouse."""
+    """Store video transcript in warehouse AND local JSON store."""
     transcript = data.get("transcript", "")
+    
+    # Always save locally (warehouse may be down)
+    local_entry = {
+        "url": data["url"],
+        "title": data["title"],
+        "channel": data["channel"],
+        "duration": data.get("duration"),
+        "view_count": data.get("view_count"),
+        "upload_date": data.get("upload_date"),
+        "transcript_preview": (transcript[:500] + "...") if len(transcript) > 500 else transcript,
+        "ingested_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Deduplicate by URL
+    existing = [v for v in _ingested_videos if v.get("url") == data["url"]]
+    if existing:
+        idx = _ingested_videos.index(existing[0])
+        _ingested_videos[idx] = local_entry
+    else:
+        _ingested_videos.append(local_entry)
+    _save_local_store()
+
+    # Try warehouse (best-effort)
     if not transcript or not INCLUDE_TRANSCRIPT_IN_WAREHOUSE:
-        return False
+        return True  # local save succeeded
 
     payload = {
         "url": data["url"],
@@ -141,7 +189,7 @@ async def _store_in_warehouse(data: dict) -> bool:
     }
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(f"{WAREHOUSE_URL}/ingest", json=payload)
+            resp = await client.post(f"{WAREHOUSE_URL}/store", json=payload)
             return resp.status_code == 200
     except Exception as e:
         log.warning("warehouse_ingest_error: %s", e)
@@ -244,6 +292,19 @@ async def ingest_video(req: VideoRequest):
         videos_ingested=1 if ok else 0,
         duration_seconds=round(time.time() - t0, 1),
     )
+
+
+@app.get("/videos/ingested")
+async def list_ingested(limit: int = 50, offset: int = 0):
+    """List locally ingested videos (survives warehouse downtime)."""
+    sorted_videos = sorted(_ingested_videos, key=lambda v: v.get("ingested_at", ""), reverse=True)
+    page = sorted_videos[offset:offset+limit]
+    return {
+        "total": len(_ingested_videos),
+        "limit": limit,
+        "offset": offset,
+        "videos": page,
+    }
 
 
 @app.post("/videos/summarize")
