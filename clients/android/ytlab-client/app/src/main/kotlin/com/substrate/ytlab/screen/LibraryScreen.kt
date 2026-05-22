@@ -11,6 +11,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
@@ -124,29 +127,63 @@ fun LibraryScreen(
                     }
                 } else {
                     items(filtered, key = { it.url }) { video ->
-                        VideoCard(
-                            video = video,
-                            onClick = { onVideoClick(video) },
-                            summary = summaries[video.url],
-                            isSummarizing = video.url in loadingSummaries,
-                            onSummarize = if (onSummarizeVideo != null) {
-                                {
-                                    scope.launch {
-                                        loadingSummaries = loadingSummaries + video.url
-                                        val result = onSummarizeVideo(video.url)
-                                        summaries = summaries + (video.url to result)
-                                        loadingSummaries = loadingSummaries - video.url
+                        val dismissState = rememberSwipeToDismissBoxState(
+                            confirmValueChange = { value ->
+                                when (value) {
+                                    SwipeToDismissBoxValue.EndToStart -> {
+                                        // Swipe left → Summarize
+                                        if (onSummarizeVideo != null && video.url !in loadingSummaries) {
+                                            scope.launch {
+                                                loadingSummaries = loadingSummaries + video.url
+                                                val result = onSummarizeVideo(video.url)
+                                                summaries = summaries + (video.url to result)
+                                                loadingSummaries = loadingSummaries - video.url
+                                            }
+                                        }
                                     }
+                                    SwipeToDismissBoxValue.StartToEnd -> {
+                                        // Swipe right → Share
+                                        val intent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_TEXT, "${video.title}\n${video.url}\n\n${summaries[video.url] ?: ""}")
+                                        }
+                                        ctx.startActivity(Intent.createChooser(intent, "Share"))
+                                    }
+                                    else -> {}
                                 }
-                            } else null,
-                            onShare = {
-                                val intent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, "${video.title}\n${video.url}\n\n${summaries[video.url] ?: ""}")
-                                }
-                                ctx.startActivity(Intent.createChooser(intent, "Share"))
-                            },
+                                false // Don't dismiss
+                            }
                         )
+                        SwipeToDismissBox(
+                            state = dismissState,
+                            backgroundContent = {},
+                            enableDismissFromStartToEnd = true,
+                            enableDismissFromEndToStart = true,
+                        ) {
+                            VideoCard(
+                                video = video,
+                                onClick = { onVideoClick(video) },
+                                summary = summaries[video.url],
+                                isSummarizing = video.url in loadingSummaries,
+                                onSummarize = if (onSummarizeVideo != null) {
+                                    {
+                                        scope.launch {
+                                            loadingSummaries = loadingSummaries + video.url
+                                            val result = onSummarizeVideo(video.url)
+                                            summaries = summaries + (video.url to result)
+                                            loadingSummaries = loadingSummaries - video.url
+                                        }
+                                    }
+                                } else null,
+                                onShare = {
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, "${video.title}\n${video.url}\n\n${summaries[video.url] ?: ""}")
+                                    }
+                                    ctx.startActivity(Intent.createChooser(intent, "Share"))
+                                },
+                            )
+                        }
                     }
                 }
 
