@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Provide processing callback to activity
+                @OptIn(kotlin.ExperimentalStdlibApi::class)
                 val processor = remember {
                     { url: String ->
                         lifecycleScope.launch {
@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
                     },
                 ) { padding ->
                     Box(modifier = Modifier.padding(padding)) {
-                        YtLabNavHost(api = api, refreshKey = libraryRefreshKey)
+                        YtLabNavHost(api = api, refreshKey = libraryRefreshKey, onProcessUrl = processor)
 
                         if (isProcessing) {
                             Surface(
@@ -180,12 +180,14 @@ sealed class Screen(val route: String, val icon: ImageVector, val label: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0) {
+fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0, onProcessUrl: (String) -> Any = {}) {
     val navController = rememberNavController()
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Library) }
     var ingestedVideos by remember { mutableStateOf(listOf<IngestedVideo>()) }
     var isRefreshing by remember { mutableStateOf(false) }
     var fetchError by remember { mutableStateOf<String?>(null) }
+    var showPaste by remember { mutableStateOf(false) }
+    var pasteText by remember { mutableStateOf("") }
 
     fun refreshLibrary() {
         kotlinx.coroutines.MainScope().launch {
@@ -216,6 +218,9 @@ fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0) {
             TopAppBar(
                 title = { Text("yt-lab", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface, titleContentColor = Accent),
+                actions = {
+                    IconButton(onClick = { showPaste = true }) { Icon(Icons.Filled.AddLink, "Paste URL", tint = TextDim) }
+                },
             )
         },
         bottomBar = {
@@ -250,6 +255,29 @@ fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0) {
                 val hash = backStackEntry.arguments?.getInt("urlHash") ?: 0
                 ingestedVideos.find { it.url.hashCode() == hash }?.let { VideoDetailScreen(video = it, api = api, onBack = { navController.popBackStack() }) }
             }
+        }
+
+        if (showPaste) {
+            AlertDialog(
+                onDismissRequest = { showPaste = false },
+                containerColor = DarkCard,
+                title = { Text("Paste YouTube URL", fontWeight = FontWeight.SemiBold) },
+                text = {
+                    OutlinedTextField(
+                        value = pasteText, onValueChange = { pasteText = it },
+                        placeholder = { Text("https://youtube.com/watch?v=...", color = TextDim) },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = TextMuted, cursorColor = Accent),
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val u = pasteText.trim(); showPaste = false; pasteText = ""
+                        if (YtLabApi.isVideoUrl(u) || YtLabApi.isChannelUrl(u)) onProcessUrl(u)
+                    }) { Text("Go", color = Accent) }
+                },
+                dismissButton = { TextButton(onClick = { showPaste = false; pasteText = "" }) { Text("Cancel", color = TextDim) } },
+            )
         }
     }
 }
