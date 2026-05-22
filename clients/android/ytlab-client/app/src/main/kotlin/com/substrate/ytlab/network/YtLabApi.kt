@@ -54,6 +54,17 @@ class YtLabApi(private val baseUrl: String = "http://localhost:8021") {
         get("/videos/ingested?limit=$limit&offset=$offset")
     }
 
+    suspend fun deleteIngestedVideo(url: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val encoded = URLEncoder.encode(url, "UTF-8")
+            val conn = URL("$baseUrl/videos/ingested?url=$encoded").openConnection() as HttpURLConnection
+            conn.requestMethod = "DELETE"
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            conn.responseCode in 200..299
+        } catch (_: Exception) { false }
+    }
+
     suspend fun addChannelWatch(url: String): JSONObject? = withContext(Dispatchers.IO) {
         post("/channels/watch", JSONObject().apply { put("channel_url", url) })
     }

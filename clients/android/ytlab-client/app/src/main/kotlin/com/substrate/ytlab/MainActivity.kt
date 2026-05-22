@@ -256,6 +256,12 @@ fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0, onProcessUrl: (String) -> A
                         val result = api.summarizeVideo(url, "bullet")
                         result?.optString("summary", "")?.ifEmpty { result?.optString("text", "Failed") ?: "Failed" } ?: "Failed"
                     },
+                    onDeleteVideo = { url ->
+                        kotlinx.coroutines.MainScope().launch {
+                            api.deleteIngestedVideo(url)
+                            refreshLibrary()
+                        }
+                    },
                 )
             }
             composable(Screen.Status.route) {

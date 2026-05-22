@@ -307,6 +307,16 @@ async def list_ingested(limit: int = 50, offset: int = 0):
     }
 
 
+@app.delete("/videos/ingested")
+async def delete_ingested(url: str):
+    """Delete an ingested video by URL."""
+    global _ingested_videos
+    before = len(_ingested_videos)
+    _ingested_videos = [v for v in _ingested_videos if v.get("url") != url]
+    _save_local_store()
+    return {"deleted": before != len(_ingested_videos), "before": before, "after": len(_ingested_videos)}
+
+
 @app.post("/videos/summarize")
 async def summarize(req: SummarizeRequest):
     """TL;DR summary of a video."""

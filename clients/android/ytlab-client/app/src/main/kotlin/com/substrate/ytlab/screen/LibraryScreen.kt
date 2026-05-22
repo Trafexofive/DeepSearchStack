@@ -47,11 +47,13 @@ fun LibraryScreen(
     isRefreshing: Boolean,
     error: String? = null,
     onSummarizeVideo: (suspend (String) -> String)? = null,
+    onDeleteVideo: ((String) -> Unit)? = null,
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var filterChannel by remember { mutableStateOf<String?>(null) }
     var summaries by remember { mutableStateOf(mapOf<String, String>()) }
     var loadingSummaries by remember { mutableStateOf(setOf<String>()) }
+    var deletingUrl by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
 
@@ -182,6 +184,7 @@ fun LibraryScreen(
                                     }
                                     ctx.startActivity(Intent.createChooser(intent, "Share"))
                                 },
+                                onDelete = if (onDeleteVideo != null) {{ deletingUrl = video.url }} else null,
                             )
                         }
                     }
@@ -190,6 +193,24 @@ fun LibraryScreen(
                 item { Spacer(Modifier.height(80.dp)) }
             }
         }
+    }
+
+    // Delete confirmation dialog
+    if (deletingUrl != null) {
+        AlertDialog(
+            onDismissRequest = { deletingUrl = null },
+            containerColor = DarkCard,
+            title = { Text("Delete video?") },
+            text = { Text("This removes it from yt-lab.", color = TextDim) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val url = deletingUrl!!
+                    deletingUrl = null
+                    onDeleteVideo?.invoke(url)
+                }) { Text("Delete", color = Accent) }
+            },
+            dismissButton = { TextButton(onClick = { deletingUrl = null }) { Text("Cancel", color = TextDim) } },
+        )
     }
 }
 
@@ -201,6 +222,7 @@ fun VideoCard(
     isSummarizing: Boolean = false,
     onSummarize: (() -> Unit)? = null,
     onShare: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     Card(
@@ -248,7 +270,7 @@ fun VideoCard(
                 Icon(Icons.Filled.ChevronRight, null, tint = TextMuted, modifier = Modifier.padding(top = 4.dp))
             }
             // Action chips
-            if (onSummarize != null || onShare != null) {
+            if (onSummarize != null || onShare != null || onDelete != null) {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (onSummarize != null) {
@@ -275,6 +297,15 @@ fun VideoCard(
                                 Icon(Icons.Filled.Share, null, tint = TextDim, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text("Share", color = TextDim, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    if (onDelete != null) {
+                        Surface(onClick = onDelete, shape = RoundedCornerShape(8.dp), color = Color.White.copy(alpha = 0.06f)) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Delete, null, tint = TextDim, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Delete", color = TextDim, style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
