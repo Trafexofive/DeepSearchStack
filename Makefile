@@ -16,7 +16,7 @@ COMPOSE_FILE_PATTERN ?= $(COMPOSE_BASE_NAME)*.yml
 COMPOSE_SEARCH_DIRS ?= infra services
 COMPOSE_SEARCH_DEPTH ?= 3
 
-PRODUCTION_STACKS ?= core humanizer yt-lab
+PRODUCTION_STACKS ?= core humanizer yt-lab dashboard
 BACKUP_DIR ?= backups
 EXPORT_DIR ?= exports
 LOG_TAIL ?= 100

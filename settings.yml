@@ -57,6 +57,9 @@ services:
     model: ${HUMANIZER_MODEL:-nvidia_nim:zhipuai/glm-4-9b-chat}
     inference_url: http://inference_gateway:8005/v1/chat/completions
 
+  dashboard:
+    port: 8015
+
   # yt-lab stack — see services/yt-lab/docker-compose.yml
   yt_lab:
     port: 8021
