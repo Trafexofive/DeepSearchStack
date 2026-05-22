@@ -417,10 +417,7 @@ prune: fclean
 .PHONY: list-stacks list-services
 
 list-stacks:
-	@echo -e "\n$(PURPLE)╔══════════════════════════════════════════════════════════════════════════════╗$(NC)"; \
-	echo -e "$(PURPLE)║$(NC)                    $(BOLD)$(CYAN)🧩 Docker Stack Status Dashboard$(NC)                    $(PURPLE)║$(NC)"; \
-	echo -e "$(PURPLE)╚══════════════════════════════════════════════════════════════════════════════╝$(NC)\n"; \
-	total_stacks=0; total_running=0; total_unhealthy=0; total_offline=0; \
+	@total_stacks=0; total_running=0; total_unhealthy=0; total_offline=0; \
 	for dir in $(COMPOSE_SEARCH_DIRS); do \
 		if [ ! -d "$$dir" ]; then continue; fi; \
 		while read -r f; do \
@@ -436,6 +433,7 @@ list-stacks:
 			running_cnt=$$(docker ps -q --filter "status=running" --filter "label=com.docker.compose.project=$$project_name" 2>/dev/null | wc -l); \
 			total_cnt=$$(docker ps -a -q --filter "label=com.docker.compose.project=$$project_name" 2>/dev/null | wc -l); \
 			unhealthy_cnt=$$(docker ps -q --filter "health=unhealthy" --filter "label=com.docker.compose.project=$$project_name" 2>/dev/null | wc -l); \
+			if [ -n "$(ONLINE)" ] && [ "$$running_cnt" -eq 0 ]; then continue; fi; \
 			total_stacks=$$((total_stacks + 1)); \
 			rel_path=$$(echo "$$f" | sed "s|^./||"); \
 			if [ "$$running_cnt" -gt 0 ]; then \
@@ -841,7 +839,7 @@ help:
 	@echo -e "  top <stack>[/service]    - Live resource monitor"
 	@echo -e "  events <stack>           - Stream Docker events"
 	@echo -e "  watch <stack>[/service]  - Live status updates"
-	@echo -e "  list-stacks              - Dashboard of all stacks"
+	@echo -e "  list-stacks [ONLINE=1]     - Dashboard (ONLINE=1 for running only)"
 	@echo -e "  list-services <stack>    - Detailed service info"
 	@echo -e "  health <stack>           - Health check report"
 	@echo ""
@@ -890,6 +888,7 @@ help:
 	@echo -e "  make logs core/blog_generator LOG_TAIL=500"
 	@echo -e "  make top core                             # Live resource monitor"
 	@echo -e "  make list-stacks                          # Dashboard of all stacks"
+	@echo -e "  make list-stacks ONLINE=1                 # Running stacks only"
 	@echo -e "  make list-services core                   # Detailed per-service info"
 	@echo -e "  make shell core/api_gateway               # Interactive shell"
 	@echo -e "  make backup core                          # Backup compose file + volumes"
