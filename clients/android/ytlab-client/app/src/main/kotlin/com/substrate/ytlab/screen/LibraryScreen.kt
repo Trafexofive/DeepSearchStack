@@ -1,5 +1,6 @@
 package com.substrate.ytlab.screen
 
+import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,8 +12,11 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,9 +43,14 @@ fun LibraryScreen(
     onRefresh: () -> Unit,
     isRefreshing: Boolean,
     error: String? = null,
+    onSummarizeVideo: (suspend (String) -> String)? = null,
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var filterChannel by remember { mutableStateOf<String?>(null) }
+    var summaries by remember { mutableStateOf(mapOf<String, String>()) }
+    var loadingSummaries by remember { mutableStateOf(setOf<String>()) }
+    val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
 
     val channels = remember(videos) { videos.map { it.channel }.distinct().sorted() }
     val filtered = remember(videos, searchQuery, filterChannel) {
@@ -115,7 +124,29 @@ fun LibraryScreen(
                     }
                 } else {
                     items(filtered, key = { it.url }) { video ->
-                        VideoCard(video, onClick = { onVideoClick(video) })
+                        VideoCard(
+                            video = video,
+                            onClick = { onVideoClick(video) },
+                            summary = summaries[video.url],
+                            isSummarizing = video.url in loadingSummaries,
+                            onSummarize = if (onSummarizeVideo != null) {
+                                {
+                                    scope.launch {
+                                        loadingSummaries = loadingSummaries + video.url
+                                        val result = onSummarizeVideo(video.url)
+                                        summaries = summaries + (video.url to result)
+                                        loadingSummaries = loadingSummaries - video.url
+                                    }
+                                }
+                            } else null,
+                            onShare = {
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, "${video.title}\n${video.url}\n\n${summaries[video.url] ?: ""}")
+                                }
+                                ctx.startActivity(Intent.createChooser(intent, "Share"))
+                            },
+                        )
                     }
                 }
 
@@ -126,42 +157,92 @@ fun LibraryScreen(
 }
 
 @Composable
-fun VideoCard(video: IngestedVideo, onClick: () -> Unit, onSummarize: ((IngestedVideo) -> Unit)? = null) {
+fun VideoCard(
+    video: IngestedVideo,
+    onClick: () -> Unit,
+    summary: String? = null,
+    isSummarizing: Boolean = false,
+    onSummarize: (() -> Unit)? = null,
+    onShare: (() -> Unit)? = null,
+) {
+    val ctx = LocalContext.current
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = DarkCard),
     ) {
-        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
-            // Channel avatar
-            Surface(Modifier.size(40.dp), shape = CircleShape, color = AccentDim) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(video.channel.take(1).uppercase(), color = Accent, fontWeight = FontWeight.Bold)
-                }
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(shape = RoundedCornerShape(5.dp), color = AccentDim) {
-                        Text(formatDuration(video.duration), Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                // Channel avatar
+                Surface(Modifier.size(40.dp), shape = CircleShape, color = AccentDim) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(video.channel.take(1).uppercase(), color = Accent, fontWeight = FontWeight.Bold)
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Text(video.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, color = TextPrimary, modifier = Modifier.weight(1f))
                 }
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(video.channel, style = MaterialTheme.typography.labelSmall, color = TextDim)
-                    Spacer(Modifier.width(6.dp)); Text("·", color = TextMuted); Spacer(Modifier.width(6.dp))
-                    Text(formatViews(video.viewCount), style = MaterialTheme.typography.labelSmall, color = TextDim)
-                    Spacer(Modifier.width(6.dp)); Text("·", color = TextMuted); Spacer(Modifier.width(6.dp))
-                    Text(video.uploadDate, style = MaterialTheme.typography.labelSmall, color = TextDim)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = RoundedCornerShape(5.dp), color = AccentDim) {
+                            Text(formatDuration(video.duration), Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(video.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, color = TextPrimary, modifier = Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(video.channel, style = MaterialTheme.typography.labelSmall, color = TextDim)
+                        Spacer(Modifier.width(6.dp)); Text("·", color = TextMuted); Spacer(Modifier.width(6.dp))
+                        Text(formatViews(video.viewCount), style = MaterialTheme.typography.labelSmall, color = TextDim)
+                        Spacer(Modifier.width(6.dp)); Text("·", color = TextMuted); Spacer(Modifier.width(6.dp))
+                        Text(video.uploadDate, style = MaterialTheme.typography.labelSmall, color = TextDim)
+                    }
+                    if (video.transcriptPreview.isNotEmpty() && summary == null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(video.transcriptPreview.take(120), style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis, color = TextMuted)
+                    }
+                    // Summary card
+                    if (summary != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFF1B2E1B)) {
+                            Text(summary.take(200), Modifier.padding(10.dp), color = Color(0xFF4CAF50), style = MaterialTheme.typography.bodySmall, lineHeight = 18.sp)
+                        }
+                    }
                 }
-                if (video.transcriptPreview.isNotEmpty()) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(video.transcriptPreview.take(120), style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis, color = TextMuted)
+                Icon(Icons.Filled.ChevronRight, null, tint = TextMuted, modifier = Modifier.padding(top = 4.dp))
+            }
+            // Action chips
+            if (onSummarize != null || onShare != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (onSummarize != null) {
+                        Surface(
+                            onClick = { if (!isSummarizing) onSummarize() },
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.White.copy(alpha = 0.06f),
+                            enabled = !isSummarizing,
+                        ) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (isSummarizing) {
+                                    CircularProgressIndicator(Modifier.size(14.dp), color = Accent, strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Filled.Summarize, null, tint = TextDim, modifier = Modifier.size(14.dp))
+                                }
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (isSummarizing) "Summarizing…" else "Summarize", color = TextDim, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    if (onShare != null) {
+                        Surface(onClick = onShare, shape = RoundedCornerShape(8.dp), color = Color.White.copy(alpha = 0.06f)) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Share, null, tint = TextDim, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Share", color = TextDim, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
                 }
             }
-            Icon(Icons.Filled.ChevronRight, null, tint = TextMuted, modifier = Modifier.padding(top = 4.dp))
         }
     }
 }

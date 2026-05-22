@@ -246,7 +246,17 @@ fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0, onProcessUrl: (String) -> A
     ) { padding ->
         NavHost(navController = navController, startDestination = Screen.Library.route, modifier = Modifier.padding(padding)) {
             composable(Screen.Library.route) {
-                LibraryScreen(videos = ingestedVideos, onVideoClick = { navController.navigate("video/${it.url.hashCode()}") }, onRefresh = { refreshLibrary() }, isRefreshing = isRefreshing, error = fetchError)
+                LibraryScreen(
+                    videos = ingestedVideos,
+                    onVideoClick = { navController.navigate("video/${it.url.hashCode()}") },
+                    onRefresh = { refreshLibrary() },
+                    isRefreshing = isRefreshing,
+                    error = fetchError,
+                    onSummarizeVideo = { url ->
+                        val result = api.summarizeVideo(url, "bullet")
+                        result?.optString("summary", "")?.ifEmpty { result?.optString("text", "Failed") ?: "Failed" } ?: "Failed"
+                    },
+                )
             }
             composable(Screen.Status.route) {
                 StatusScreen(api = api, ingestedCount = ingestedVideos.size, onRefresh = { refreshLibrary() })
