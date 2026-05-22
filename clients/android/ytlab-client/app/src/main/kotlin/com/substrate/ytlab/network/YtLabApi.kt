@@ -1,4 +1,4 @@
-package com.substrate.ytlab
+package com.substrate.ytlab.network
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -10,7 +10,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-class YtLabApi(private val baseUrl: String) {
+class YtLabApi(private val baseUrl: String = "http://localhost:8021") {
+
+    data class IngestProgress(val video: Int, val total: Int, val title: String = "")
 
     companion object {
         fun isVideoUrl(url: String): Boolean {
@@ -20,15 +22,12 @@ class YtLabApi(private val baseUrl: String) {
                    u.contains("youtube.com/shorts/") ||
                    u.contains("m.youtube.com/watch")
         }
-
         fun isChannelUrl(url: String): Boolean {
             val u = url.lowercase()
             return u.contains("youtube.com/@") ||
                    u.contains("youtube.com/channel/") ||
                    u.contains("youtube.com/c/")
         }
-
-        fun isYoutubeUrl(url: String) = isVideoUrl(url) || isChannelUrl(url)
     }
 
     suspend fun getVideoMetadata(url: String): JSONObject? = withContext(Dispatchers.IO) {
@@ -51,57 +50,70 @@ class YtLabApi(private val baseUrl: String) {
         })
     }
 
-    suspend fun addWatch(url: String): JSONObject? = withContext(Dispatchers.IO) {
-        post("/channels/watch", JSONObject().apply {
-            put("channel_url", url)
-        })
+    suspend fun getIngestedVideos(limit: Int = 100, offset: Int = 0): JSONObject? = withContext(Dispatchers.IO) {
+        get("/videos/ingested?limit=$limit&offset=$offset")
+    }
+
+    suspend fun addChannelWatch(url: String): JSONObject? = withContext(Dispatchers.IO) {
+        post("/channels/watch", JSONObject().apply { put("channel_url", url) })
+    }
+
+    suspend fun getWatchingChannels(): JSONObject? = withContext(Dispatchers.IO) {
+        get("/channels/watching")
     }
 
     suspend fun health(): JSONObject? = withContext(Dispatchers.IO) {
         get("/health")
     }
 
+    suspend fun getBlogStats(): JSONObject? = withContext(Dispatchers.IO) {
+        httpGet("http://localhost:8006/stats")
+    }
+
+    suspend fun getBlogHealth(): JSONObject? = withContext(Dispatchers.IO) {
+        httpGet("http://localhost:8006/health")
+    }
+
+    private suspend fun httpGet(url: String): JSONObject? = withContext(Dispatchers.IO) {
+        try {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            if (conn.responseCode !in 200..299) return@withContext null
+            val text = BufferedReader(InputStreamReader(conn.inputStream)).readText()
+            conn.disconnect()
+            JSONObject(text)
+        } catch (_: Exception) { null }
+    }
+
     private fun get(path: String): JSONObject? {
         return try {
             val conn = URL("$baseUrl$path").openConnection() as HttpURLConnection
             conn.connectTimeout = 10_000
-            conn.readTimeout = 15_000
-            conn.requestMethod = "GET"
-
-            val code = conn.responseCode
-            if (code !in 200..299) return null
-
+            conn.readTimeout = 30_000
+            if (conn.responseCode !in 200..299) return null
             val text = BufferedReader(InputStreamReader(conn.inputStream)).readText()
             conn.disconnect()
             JSONObject(text)
-        } catch (e: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
-    private fun post(path: String, body: JSONObject): JSONObject? {
-        return try {
+    private suspend fun post(path: String, body: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
+        try {
             val conn = URL("$baseUrl$path").openConnection() as HttpURLConnection
             conn.connectTimeout = 10_000
             conn.readTimeout = 120_000
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/json")
             conn.doOutput = true
-
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-
             val code = conn.responseCode
-            if (code !in 200..299) {
-                val err = BufferedReader(InputStreamReader(conn.errorStream)).readText()
-                conn.disconnect()
-                return JSONObject().apply { put("error", err) }
-            }
-
-            val text = BufferedReader(InputStreamReader(conn.inputStream)).readText()
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = BufferedReader(InputStreamReader(stream ?: conn.inputStream)).readText()
             conn.disconnect()
-            JSONObject(text)
+            if (code in 200..299) JSONObject(text) else JSONObject().apply { put("error", text) }
         } catch (e: Exception) {
-            JSONObject().apply { put("error", e.message) }
+            JSONObject().apply { put("error", e.message ?: "Unknown") }
         }
     }
 }
