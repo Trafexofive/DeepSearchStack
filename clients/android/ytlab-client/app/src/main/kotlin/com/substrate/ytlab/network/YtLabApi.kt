@@ -50,6 +50,10 @@ class YtLabApi(private val baseUrl: String = "http://localhost:8021") {
         })
     }
 
+    suspend fun ingestVideo(url: String): JSONObject? = withContext(Dispatchers.IO) {
+        post("/videos/ingest", JSONObject().apply { put("video_url", url) })
+    }
+
     suspend fun getIngestedVideos(limit: Int = 100, offset: Int = 0): JSONObject? = withContext(Dispatchers.IO) {
         get("/videos/ingested?limit=$limit&offset=$offset")
     }

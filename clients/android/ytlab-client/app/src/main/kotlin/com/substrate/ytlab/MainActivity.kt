@@ -55,6 +55,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Force refresh when processing completes
+                LaunchedEffect(isProcessing) {
+                    if (!isProcessing && libraryRefreshKey > 0) {
+                        kotlinx.coroutines.delay(800)
+                        libraryRefreshKey++
+                    }
+                }
+
                 @OptIn(kotlin.ExperimentalStdlibApi::class)
                 val processor = remember {
                     { url: String ->
@@ -67,13 +75,12 @@ class MainActivity : ComponentActivity() {
                                     refreshAndNotify("✅ ${r?.optInt("videos_found", 0) ?: 0} videos ingested")
                                     showNotification("📺 Channel", "${r?.optInt("videos_found", 0) ?: 0} videos")
                                 } else if (YtLabApi.isVideoUrl(url)) {
-                                    processingStatus = "Fetching metadata…"
-                                    val meta = api.getVideoMetadata(url)
-                                    val title = meta?.optString("title", "Unknown") ?: "Unknown"
-                                    val transcript = meta?.optString("transcript", "") ?: ""
-
-                                    if (transcript.length < 100) {
-                                        refreshAndNotify("⚠️ No transcript: $title")
+                                    processingStatus = "Ingesting…"
+                                    val ingested = api.ingestVideo(url)
+                                    val title = ingested?.optString("channel", "") ?: ""
+                                    val videoCount = ingested?.optInt("videos_ingested", 0) ?: 0
+                                    if (videoCount == 0) {
+                                        refreshAndNotify("⚠️ Could not ingest video")
                                         return@launch
                                     }
                                     processingStatus = "Summarizing…"
@@ -83,7 +90,7 @@ class MainActivity : ComponentActivity() {
                                         refreshAndNotify("✅ $title")
                                         showNotification("✅ $title", text.take(200))
                                     } else {
-                                        refreshAndNotify("❌ Summary failed: $title")
+                                        refreshAndNotify("✅ $title ingested")
                                     }
                                 }
                             } catch (e: Exception) {
@@ -125,8 +132,10 @@ class MainActivity : ComponentActivity() {
                 // Process pending URL from share intent
                 LaunchedEffect(_pendingUrl.value) {
                     val url = _pendingUrl.value
+
                     if (url != null && (YtLabApi.isVideoUrl(url) || YtLabApi.isChannelUrl(url))) {
                         _pendingUrl.value = null
+
                         processor(url)
                     }
                 }
@@ -211,6 +220,13 @@ fun YtLabNavHost(api: YtLabApi, refreshKey: Int = 0, onProcessUrl: (String) -> A
     }
 
     LaunchedEffect(Unit) { refreshLibrary() }
+    // Auto-refresh periodically
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(5000)
+            if (!isRefreshing) refreshLibrary()
+        }
+    }
     LaunchedEffect(refreshKey) { if (refreshKey > 0) refreshLibrary() }
 
     Scaffold(
