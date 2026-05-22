@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.google.devtools.ksp") version "1.9.24-1.0.20"
 }
 
 android {
@@ -37,7 +38,7 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
+        kotlinCompilerExtensionVersion = "1.5.14"
     }
 
     packaging {
@@ -46,7 +47,7 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.01.00")
+    val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
     implementation(composeBom)
 
     implementation("androidx.core:core-ktx:1.12.0")
@@ -68,6 +69,12 @@ dependencies {
 
     // JSON
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+
+    // Room (local persistence)
+    val roomVersion = "2.6.1"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

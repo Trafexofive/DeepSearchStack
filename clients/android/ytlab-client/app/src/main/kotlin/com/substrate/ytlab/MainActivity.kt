@@ -14,17 +14,24 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.*
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
+import com.substrate.ytlab.data.AppDatabase
+import com.substrate.ytlab.data.JobEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
     private val api = YtLabApi("http://localhost:8021")
+    private val blogApi = "http://localhost:8006"
+    private lateinit var db: AppDatabase
     private var lastShareUrl: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         createNotificationChannel()
+        db = AppDatabase.getInstance(this)
 
         val sharedUrl = extractSharedUrl(intent)
         if (sharedUrl != null) {
@@ -34,6 +41,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             YtLabApp(
                 api = api,
+                db = db,
+                blogApi = blogApi,
                 initialUrl = lastShareUrl,
                 onProcessUrl = { url -> processUrl(url) },
             )
@@ -53,21 +62,34 @@ class MainActivity : ComponentActivity() {
 
     private fun extractSharedUrl(intent: Intent): String? {
         if (intent.action != Intent.ACTION_SEND) return null
-        val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return null
-        return text.trim()
+        return intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
     }
 
     private fun processUrl(url: String) {
         lifecycleScope.launch {
             try {
                 if (YtLabApi.isChannelUrl(url)) {
+                    val job = JobEntity(url = url, type = "channel", status = "running")
+                    val jobId = withContext(Dispatchers.IO) { db.jobDao().insert(job) }
+
                     showNotification("📺 Ingesting channel…", url.take(60))
                     val result = api.ingestChannel(url, 10)
                     val count = result?.get("count")?.toString() ?: "?"
-                    showNotification("✅ Channel ingested", "$count videos found")
-                } else if (YtLabApi.isVideoUrl(url)) {
-                    showNotification("📹 Fetching video…", url.take(60))
 
+                    withContext(Dispatchers.IO) {
+                        db.jobDao().update(job.copy(
+                            id = jobId,
+                            title = "Channel: $url".take(100),
+                            result = "$count videos ingested",
+                            status = "done",
+                        ))
+                    }
+                    showNotification("✅ $count videos", url.take(60))
+                } else if (YtLabApi.isVideoUrl(url)) {
+                    val job = JobEntity(url = url, type = "video", status = "running")
+                    val jobId = withContext(Dispatchers.IO) { db.jobDao().insert(job) }
+
+                    showNotification("📹 Fetching…", url.take(60))
                     val meta = api.getVideoMetadata(url)
                     val title = meta?.get("title")?.toString() ?: "Unknown"
                     val channel = meta?.get("channel")?.toString() ?: "?"
@@ -75,19 +97,30 @@ class MainActivity : ComponentActivity() {
 
                     if (transcript.length < 100) {
                         showNotification("⚠️ No transcript", title)
+                        withContext(Dispatchers.IO) {
+                            db.jobDao().update(job.copy(id = jobId, title = title, channel = channel, status = "error", result = "No transcript"))
+                        }
                         return@launch
                     }
 
                     showNotification("📝 Summarizing…", title)
-
                     val summary = api.summarizeVideo(url, "bullet")
-                    val summaryText: String = (summary?.get("summary") ?: summary?.get("text") ?: summary)?.toString() ?: "Summary failed"
+                    val summaryText: String = (summary?.get("summary") ?: summary?.get("text") ?: summary)?.toString() ?: "Failed"
 
+                    withContext(Dispatchers.IO) {
+                        db.jobDao().update(job.copy(
+                            id = jobId,
+                            title = title,
+                            channel = channel,
+                            result = summaryText,
+                            status = "done",
+                        ))
+                    }
                     val lines = summaryText.split("\n").take(5).joinToString("\n")
                     showNotification("✅ $title", lines)
                 }
             } catch (e: Exception) {
-                showNotification("❌ Error", e.message ?: "Unknown error")
+                showNotification("❌ Error", e.message ?: "Unknown")
             }
         }
     }
