@@ -3,6 +3,7 @@
 Receives content from the crawler service, stores in SQLite with full-text search.
 Provides query API for agents to retrieve stored knowledge.
 """
+
 import hashlib
 import json
 import logging
@@ -36,6 +37,7 @@ app = FastAPI(title="Knowledge Warehouse", version="2.0.0")
 _write_lock = threading.Lock()
 _write_conn: sqlite3.Connection | None = None
 
+
 def _get_write_conn() -> sqlite3.Connection:
     """Get the single write connection (thread-safe, auto-reconnect)."""
     global _write_conn
@@ -53,6 +55,7 @@ def _get_write_conn() -> sqlite3.Connection:
         _write_lock.release()
         raise
 
+
 @contextmanager
 def write_txn():
     """Context manager for write transactions. Auto-commits on success, rolls back on error."""
@@ -65,6 +68,7 @@ def write_txn():
         raise
     finally:
         _write_lock.release()
+
 
 def _read_conn() -> sqlite3.Connection:
     """Get a read-only connection (safe without lock in WAL mode)."""
@@ -95,9 +99,15 @@ def _init_db():
                 tags TEXT DEFAULT '[]'
             )
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_domain ON content(source_domain)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_ingested ON content(ingested_at)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_url_hash ON content(url_hash)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_warehouse_domain ON content(source_domain)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_warehouse_ingested ON content(ingested_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_warehouse_url_hash ON content(url_hash)"
+        )
         # FTS5 full-text search
         conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
@@ -126,6 +136,7 @@ def _init_db():
             END
         """)
         conn.commit()
+
 
 _init_db()
 
@@ -196,6 +207,7 @@ class StatsResponse(BaseModel):
 
 # ─── Endpoints ────────────────────────────────────────────
 
+
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest(req: IngestRequest):
     """Ingest crawled content into the warehouse."""
@@ -210,29 +222,55 @@ async def ingest(req: IngestRequest):
         ).fetchone()
 
         if existing:
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE content SET markdown=?, content=?, title=?, author=?,
                 published=?, language=?, word_count=?, ingested_at=?, tags=?
                 WHERE url_hash=?
-            """, (
-                md, content, req.title, req.author, req.published,
-                req.language, req.word_count, time.time(),
-                json.dumps(req.tags), url_hash,
-            ))
+            """,
+                (
+                    md,
+                    content,
+                    req.title,
+                    req.author,
+                    req.published,
+                    req.language,
+                    req.word_count,
+                    time.time(),
+                    json.dumps(req.tags),
+                    url_hash,
+                ),
+            )
             log.info("ingest_update url=%s id=%s", req.url[:100], existing[0])
-            return IngestResponse(id=existing[0], url=req.url, ingested=True, cached=True)
+            return IngestResponse(
+                id=existing[0], url=req.url, ingested=True, cached=True
+            )
 
-        cursor = conn.execute("""
+        cursor = conn.execute(
+            """
             INSERT INTO content (url_hash, url, title, markdown, content, author,
             published, language, word_count, source_domain, ingested_at, tags)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            url_hash, req.url, req.title, md, content, req.author,
-            req.published, req.language, req.word_count, domain,
-            time.time(), json.dumps(req.tags),
-        ))
+        """,
+            (
+                url_hash,
+                req.url,
+                req.title,
+                md,
+                content,
+                req.author,
+                req.published,
+                req.language,
+                req.word_count,
+                domain,
+                time.time(),
+                json.dumps(req.tags),
+            ),
+        )
         row_id = cursor.lastrowid
-        log.info("ingest_new url=%s id=%s words=%d", req.url[:100], row_id, req.word_count)
+        log.info(
+            "ingest_new url=%s id=%s words=%d", req.url[:100], row_id, req.word_count
+        )
         return IngestResponse(id=row_id, url=req.url, ingested=True)
 
 
@@ -245,11 +283,18 @@ async def get_content(item_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Content not found")
         return ContentItem(
-            id=row["id"], url=row["url"], title=row["title"],
-            markdown=row["markdown"], author=row["author"],
-            published=row["published"], language=row["language"],
-            word_count=row["word_count"], source_domain=row["source_domain"],
-            ingested_at=datetime.fromtimestamp(row["ingested_at"], tz=timezone.utc).isoformat(),
+            id=row["id"],
+            url=row["url"],
+            title=row["title"],
+            markdown=row["markdown"],
+            author=row["author"],
+            published=row["published"],
+            language=row["language"],
+            word_count=row["word_count"],
+            source_domain=row["source_domain"],
+            ingested_at=datetime.fromtimestamp(
+                row["ingested_at"], tz=timezone.utc
+            ).isoformat(),
             tags=json.loads(row["tags"]),
         )
     finally:
@@ -268,9 +313,12 @@ async def search(
         query = q.replace("'", "''")
         where = ""
         if domain:
-            where = f"AND c.source_domain = '{domain.replace(chr(39), chr(39)+chr(39))}'"
+            where = (
+                f"AND c.source_domain = '{domain.replace(chr(39), chr(39)+chr(39))}'"
+            )
 
-        rows = conn.execute(f"""
+        rows = conn.execute(
+            f"""
             SELECT c.id, c.url, c.title, c.source_domain, c.ingested_at, c.word_count,
                    snippet(content_fts, 1, '<b>', '</b>', '...', 40) as snippet
             FROM content_fts
@@ -278,14 +326,21 @@ async def search(
             WHERE content_fts MATCH ? {where}
             ORDER BY rank
             LIMIT ?
-        """, (query, limit)).fetchall()
+        """,
+            (query, limit),
+        ).fetchall()
 
         return [
             SearchResult(
-                id=row["id"], url=row["url"], title=row["title"],
-                snippet=row["snippet"], source_domain=row["source_domain"],
+                id=row["id"],
+                url=row["url"],
+                title=row["title"],
+                snippet=row["snippet"],
+                source_domain=row["source_domain"],
                 word_count=row["word_count"],
-                ingested_at=datetime.fromtimestamp(row["ingested_at"], tz=timezone.utc).isoformat(),
+                ingested_at=datetime.fromtimestamp(
+                    row["ingested_at"], tz=timezone.utc
+                ).isoformat(),
             )
             for row in rows
         ]
@@ -295,7 +350,9 @@ async def search(
 
 @app.get("/list", response_model=list[ListResult])
 async def list_entries(
-    sort: str = Query("ingested_at", description="Sort field: ingested_at, word_count, title, domain"),
+    sort: str = Query(
+        "ingested_at", description="Sort field: ingested_at, word_count, title, domain"
+    ),
     order: str = Query("desc", description="Sort order: asc or desc"),
     domain: Optional[str] = Query(None, description="Filter by domain"),
     min_words: Optional[int] = Query(None, description="Minimum word count"),
@@ -343,7 +400,9 @@ async def list_entries(
                 "title": row["title"],
                 "snippet": (row["title"] or "")[:100],
                 "source_domain": row["source_domain"],
-                "ingested_at": datetime.fromtimestamp(row["ingested_at"], tz=timezone.utc).isoformat(),
+                "ingested_at": datetime.fromtimestamp(
+                    row["ingested_at"], tz=timezone.utc
+                ).isoformat(),
                 "word_count": row["word_count"],
                 "author": row["author"],
                 "tags": json.loads(row["tags"]) if row["tags"] else [],
@@ -359,7 +418,9 @@ async def stats():
     """Warehouse statistics."""
     conn = _read_conn()
     try:
-        total = conn.execute("SELECT COUNT(*), COALESCE(SUM(word_count), 0) FROM content").fetchone()
+        total = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(word_count), 0) FROM content"
+        ).fetchone()
         domains = conn.execute(
             "SELECT source_domain, COUNT(*) as cnt FROM content GROUP BY source_domain ORDER BY cnt DESC LIMIT 20"
         ).fetchall()
@@ -368,7 +429,8 @@ async def stats():
         conn.close()
 
     return StatsResponse(
-        total_entries=total[0], total_words=total[1],
+        total_entries=total[0],
+        total_words=total[1],
         domains=[{"domain": d, "count": c} for d, c in domains],
         db_size_mb=round(db_size, 2),
     )
@@ -410,9 +472,11 @@ async def root():
 
 def _extract_domain(url: str) -> str:
     from urllib.parse import urlparse
+
     return urlparse(url).netloc or "unknown"
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8009)
