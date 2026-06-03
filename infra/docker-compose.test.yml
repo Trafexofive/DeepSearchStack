@@ -127,7 +127,7 @@ services:
     restart: unless-stopped
     networks: [deepsearch_net]
     volumes:
-      - ./services/searxng/settings.yml:/etc/searxng/settings.yml
+      - ../services/searxng/settings.yml:/etc/searxng/settings.yml
     cap_drop: [ALL]
     cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE]
 

@@ -50,6 +50,17 @@ class ConsensusFact:
     confidence: float
     supporting_sources: list[str] = field(default_factory=list)
     conflicting_sources: list[str] = field(default_factory=list)
+    quality: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ConsensusFact":
+        return cls(
+            claim=d.get("claim", ""),
+            confidence=d.get("confidence", 0.0),
+            supporting_sources=d.get("supporting_sources", []),
+            conflicting_sources=d.get("conflicting_sources", []),
+            quality=d.get("quality", ""),
+        )
 
 
 @dataclass
@@ -83,7 +94,7 @@ class AggregateResponse:
             total_sources=data["total_sources"],
             domains_queried=data["domains_queried"],
             sources=[SearchResult(**s) for s in data.get("sources", [])],
-            consensus=[ConsensusFact(**c) for c in data.get("consensus", [])],
+            consensus=[ConsensusFact.from_dict(c) for c in (data.get("consensus") or [])],
             synthesis=data.get("synthesis") or data.get("answer"),
             execution_time_ms=data.get("execution_time_ms", 0),
             scraped_urls=data.get("scraped_urls", 0),
