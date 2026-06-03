@@ -10,20 +10,20 @@ The **DeepSearch** service is the core engine of DeepSearchStack. It replaces th
 ┌──────────────────────────────────────────────────────────────────┐
 │                        DeepSearch Service                        │
 │                                                                  │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │              DeepSearch Engine (core/engine.py)            │ │
-│  │                                                            │ │
-│  │  Stage 1: Search     → Parallel multi-provider queries    │ │
-│  │  Stage 2: Scrape     → Concurrent content extraction      │ │
-│  │  Stage 3: Embed      → Vector database storage            │ │
-│  │  Stage 4: Retrieve   → RAG semantic search                │ │
-│  │  Stage 5: Synthesize → LLM answer generation              │ │
-│  └────────────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │              DeepSearch Engine (core/engine.py)            │  │
+│  │                                                            │  │
+│  │  Stage 1: Search     → Parallel multi-provider queries     │  │
+│  │  Stage 2: Scrape     → Concurrent content extraction       │  │
+│  │  Stage 3: Embed      → Vector database storage             │  │
+│  │  Stage 4: Retrieve   → RAG semantic search                 │  │
+│  │  Stage 5: Synthesize → LLM answer generation               │  │
+│  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐               │
-│  │ Session    │  │ Cache      │  │ Metrics    │               │
-│  │ Storage    │  │ Manager    │  │ Collector  │               │
-│  └────────────┘  └────────────┘  └────────────┘               │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐                  │
+│  │ Session    │  │ Cache      │  │ Metrics    │                  │
+│  │ Storage    │  │ Manager    │  │ Collector  │                  │
+│  └────────────┘  └────────────┘  └────────────┘                  │
 └──────────────────────────────────────────────────────────────────┘
            │              │              │              │
            ▼              ▼              ▼              ▼

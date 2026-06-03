@@ -1,259 +1,572 @@
+# DeepSearchStack
 
+> **Multi-stage search & synthesis pipeline.** Search → scrape → embed → retrieve → synthesize.
+> Self-hosted, Docker-native, FOSS. 159 files, 11,408 lines of Python.
 
-# DeepSearchStack: Your Private, Self-Hosted AI Search and Reasoning Engine
-
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-green.svg)![Python Version](https://img.shields.io/badge/Python-3.11+-blue?logo=python)![Docker Support](https://img.shields.io/badge/Docker-Ready-blue?logo=docker)
-
-DeepSearchStack is a comprehensive, privacy-first, and fully self-hostable search and intelligence platform. It moves beyond simple keyword matching by integrating multiple search backends with a powerful, multi-provider LLM gateway. This allows it to perform federated searches, understand context, and synthesize high-quality, cited answers to complex questions—all while running on your own hardware.
-
-Regain sovereignty over your data and build your own private search and reasoning engine.
-
-## ✨ Core Features
-
--   🧠 **AI-Synthesized Answers:** Instead of just a list of links, get direct, comprehensive answers to your questions, synthesized from multiple sources by a Large Language Model.
--   🔒 **Privacy-First & Self-Hosted:** The entire stack runs on your own infrastructure. Your queries and data never leave your control. No tracking, no ads.
--   🌐 **Federated Search:** Gathers results from multiple backends simultaneously (including privacy-respecting meta-search engines and peer-to-peer networks) for comprehensive coverage.
--   🔌 **Multi-Provider LLM Gateway:** A resilient, non-blocking gateway that supports local models via **Ollama** and can be extended with external APIs like **Groq** and **Gemini**. It's designed for high availability with automatic provider fallback.
--   📚 **Retrieval-Augmented Generation (RAG) Ready:** The architecture is built to support a true RAG pipeline, with a dedicated vector store for semantic retrieval.
--   🚀 **Simple Deployment:** The entire stack is containerized with Docker and managed with a powerful `Makefile`, allowing you to go from clone to query in minutes.
--   🖥️ **Web Interface:** Includes OpenWebUI for a user-friendly chat interface to interact with your LLMs.
--   🔧 **Extensible & Configurable:** Easily enable or disable LLM providers, configure which models to use, and add new search backends.
-
-##  Showcase: Live Demo Output
-
-DeepSearchStack doesn't just return links. It understands, synthesizes, and cites its sources.
-
-**Query:** `python3 examples/query_search_agent.py`
-
-```
-Response from Search Agent:
-Answer: The latest news on Gemini projects depends on which "Gemini" project you're referring to.  There are several:
-
-**Google's Gemini AI models:**  The most recent updates concern Gemini 1.5 Pro and Gemini 1.5 Flash, which are now generally available [4].  A cost-efficient and faster version, Gemini 1.5 Flash-Lite, has also been released [4].  These models show improvements in coding, science, reasoning, and multimodal benchmarks [2], and now include native audio output for a more natural conversational experience and advanced security safeguards [10].  Further development includes Project Mariner, a research tool enabling human-agent interaction, coming to the Gemini API and Vertex AI [9].
-
-**NASA's Gemini Project:** This refers to the crewed spaceflights of the 1960s.  The final mission, Gemini 12, concluded the program [1]. There are also references to later updates, with mentions of Gemini II in May 2025 [7], but these lack specific details.
-
-**Other Gemini Projects:** A project called GEMINI, hosted by TU Dublin, was formally launched in November 2024 [5].
-
-Sources:
-- Project Gemini - NASA: https://www.nasa.gov/gemini/
-- Get the latest news about Google Gemini: https://gemini.google/latest-news/
-- Official Gemini news and updates | Google Blog: https://blog.google/products/gemini/
-- News and Events | GEMINI - Demonstration to Transformation: https://geminigeothermal.com/news/
-- Google introduces Gemini 1.0: A new AI model for the agentic era: https://blog.google/technology/google-deepmind/google-gemini-ai-update-december-2024/
-- ...and many more.
-```
-
-## 🏗️ Architecture
-
-The stack is composed of several microservices that work in concert, providing a clear separation of concerns and enabling scalability.
-
-```mermaid
-graph TD
-    subgraph User_Interaction
-        CLI[CLI / API Client]
-        WebApp[Web UI (web-api)]
-        OpenWebUI[OpenWebUI]
-    end
-
-    subgraph Core_Logic
-        SearchAgent[Search Agent (search-agent)]
-        LLMGateway[LLM API Gateway (llm-gateway)]
-    end
-
-    subgraph AI_Data_Services
-        Ollama[Ollama (Local LLM)]
-        VectorStore[Vector Store (ChromaDB)]
-        Postgres[PostgreSQL (Metadata)]
-    end
-
-    subgraph External_APIs
-        GroqAPI[Groq Cloud API]
-        GeminiAPI[Google Gemini API]
-    end
-    
-    subgraph Search_Backends
-        Whoogle[Whoogle]
-        SearXNG[SearXNG]
-        YaCy[YaCy (P2P)]
-    end
-
-    CLI --> SearchAgent
-    WebApp --> SearchAgent
-    OpenWebUI --> LLMGateway
-    SearchAgent --> Whoogle
-    SearchAgent --> SearXNG
-    SearchAgent --> YaCy
-    SearchAgent --> LLMGateway
-    LLMGateway --> Ollama
-    LLMGateway --> GroqAPI
-    LLMGateway --> GeminiAPI
-    SearchAgent --> VectorStore
-    SearchAgent --> Postgres
-```
 ---
 
-## 🚀 Getting Started (Quick Start)
+## Pipeline
 
-Get the entire stack up and running in just a few commands.
-
-**Prerequisites:**
-*   Git
-*   Docker & Docker Compose
-
-**1. Clone the Repository**```bash
-git clone https://github.com/your-username/DeepSearchStack.git
-cd DeepSearchStack
+```
+User Query
+  │
+  ▼
+search-gateway (13 providers across 8 domains)
+  │
+  ├─► whoogle, searxng, yacy, duckduckgo (web)
+  ├─► wikipedia (encyclopedia)
+  ├─► stackexchange (Q&A)
+  ├─► arxiv, pubmed, crossref (academic)
+  ├─► github (code)
+  ├─► hackernews (social news)
+  └─► reddit, internetarchive (social + archive)
+  │
+  ▼
+ResultRanker (TF-IDF cosine similarity + domain authority scoring)
+  │
+  ▼
+crawler (crawl4ai full-page extraction, SQLite domain-TTL cache)
+  │
+  ├─► knowledge-warehouse (SQLite FTS5, persistent content store)
+  └─► vector-store (ChromaDB, all-MiniLM-L6-v2, 384-dim embeddings)
+  │
+  ▼
+search-agent / web-api (LLM context-stuffing + streaming synthesis)
+  │
+  ▼
+Cited answer with source URLs
 ```
 
-**2. Configure Your Environment**
-Copy the example environment file. By default, the stack will run with only the local Ollama provider.
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         CLIENTS                                  │
+│  dss.py CLI  ·  Python SDK (deepsearch)  ·  REST API  ·  Web UI  │
+└─────────────────────────────┬────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────┐
+│                    SEARCH GATEWAY (:8002)                        │
+│  13 providers · TF-IDF ranking · circuit breakers · rate limits  │
+└──┬──────────┬──────────┬──────────┬──────────┬───────────────────┘
+   │          │          │          │          │
+┌──▼────┐ ┌──▼────┐ ┌──▼────┐ ┌──▼────┐ ┌───▼──────┐
+│Whoogle│ │SearXNG│ │ YaCy  │ │DuckGo │ │Wikipedia │
+└───────┘ └───────┘ └───────┘ └───────┘ └──────────┘
+┌───────┐ ┌───────┐ ┌──────┐ ┌──────┐ ┌──────────┐
+│StackEx│ │ arXiv │ │PubMed│ │GitHub│ │HackerNews│
+└───────┘ └───────┘ └──────┘ └──────┘ └──────────┘
+┌───────┐ ┌────────┐ ┌───────────────┐
+│Reddit │ │CrossRef│ │InternetArchive│
+└───────┘ └────────┘ └───────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────┐
+│                      CRAWLER (:8000)                             │
+│  crawl4ai · SQLite domain-TTL cache · batch crawl · async queue  │
+└──┬──────────────────────────┬────────────────────────────────────┘
+   │                          │
+┌──▼──────────────────┐ ┌─────▼─────────────────────────────┐
+│ KNOWLEDGE WAREHOUSE │ │        VECTOR STORE (:8004)       │
+│ (:8009)             │ │  ChromaDB · all-MiniLM-L6-v2      │
+│ SQLite FTS5         │ │  384-dim embeddings               │
+│ 13.6K+ entries      │ │  cosine similarity search         │
+└──────────┬──────────┘ └───────────────────────────────────┘
+           │
+┌──────────▼───────────────────────────────────────────────────┐
+│                     WEB API (:8014)                          │
+│  /api/search/stream     · SSE streaming search → synthesis   │
+│  /api/aggregate         · multi-provider aggregation         │
+│  /api/warehouse/*       · FTS5 listing, search, content      │
+│  /api/ingest/*          · URL + RSS/Atom feed ingestion      │
+│  /api/facts             · consensus fact DB query            │
+│  /api/metrics           · request counters, latency, gauges  │
+│  /api/providers         · provider health listing            │
+└──────────────────┬───────────────────────────────────────────┘
+                   │
+┌──────────────────▼────────────────────────────────────────────┐
+│                 SEARCH AGENT (:8013)                          │
+│  SynthesizerAgent v9.0.0                                      │
+│  context-stuffing · source citation [1][2] · streaming chunks │
+│  fallback provider routing · multi-provider resilience        │
+└───────────────────────────────────────────────────────────────┘
+
+Data Stores:
+┌──────────┐ ┌──────────┐
+│PostgreSQL│ │  Redis   │
+│ :5432    │ │  :6379   │
+│ metadata │ │ cache +  │
+│          │ │ pub/sub  │
+└──────────┘ └──────────┘
+```
+
+---
+
+## Services
+
+| Service | Port | Lines | Description |
+|---------|:----:|:-----:|-------------|
+| **web-api** | 8014 | 1,226 | REST orchestrator — cross-domain aggregation, streaming SSE, warehouse proxy, ingest, facts, metrics |
+| **crawler** | 8000 | 583 | crawl4ai full-page extraction — SQLite domain-TTL cache, batch crawl, async retry queue |
+| **search-gateway** | 8002 | 71+ | 13-provider routing — Whoogle, SearXNG, YaCy, DuckDuckGo, Wikipedia, StackExchange, arXiv, PubMed, GitHub, HackerNews, Reddit, CrossRef, InternetArchive |
+| **knowledge-warehouse** | 8009 | 418 | SQLite FTS5 content repository — 13.6K+ entries, paginated listing, full-text search |
+| **deepsearch** | 8001 | 302 | Deprecated shim — proxies to web-api:8014, preserves session management |
+| **vector-store** | 8004 | 153 | ChromaDB — all-MiniLM-L6-v2 (384-dim), ONNX-bundled, no model download needed |
+| **search-agent** | 8013 | 112 | SynthesizerAgent v9 — context-stuffing, bracket citations, streaming synthesis |
+| **searxng** | — | — | Self-hosted privacy meta-search engine instance |
+| **postgres** | 5432 | — | Metadata store (searchdb/searchuser) |
+| **redis** | 6379 | — | Response cache + pub/sub |
+
+---
+
+## Search Providers (13 across 8 domains)
+
+| Domain | Provider | Type | Rate Limit |
+|--------|---------|------|:----------:|
+| Web | Whoogle | Self-hosted meta-search | — |
+| Web | SearXNG | Self-hosted meta-search | — |
+| Web | YaCy | P2P search engine | — |
+| Web | DuckDuckGo | Direct API (free, no key) | — |
+| Encyclopedia | Wikipedia | Direct API | — |
+| Q&A | StackExchange | Direct API | — |
+| Academic | arXiv | Direct API (free) | 1 req / 3s |
+| Academic | PubMed | Direct API (free) | — |
+| Academic | CrossRef | Direct API (free) | — |
+| Code | GitHub | Direct API (free) | — |
+| Social News | HackerNews | Direct API (free) | — |
+| Social | Reddit | Direct API (free) | custom UA required |
+| Archive | InternetArchive | Direct API (free) | — |
+
+### TF-IDF Ranking
+Uses scikit-learn TF-IDF vectorization with cosine similarity against the query + domain authority weights (Wikipedia 0.95, arXiv/StackExchange 0.85-0.9, GitHub 0.9, Medium 0.7).
+
+---
+
+## Project Structure
+
+```
+DeepSearchStack/                      # 159 files, 11,408 LoC Python
+│
+├── infra/                            # Docker Compose stacks
+│   ├── dss-full.compose.yml          # Full stack — all services
+│   ├── dss-light.compose.yml         # Minimal — API + crawler + vector-store
+│   ├── dss-test.compose.yml          # Test stack — gateway + crawler + vector
+│   ├── config/
+│   │   ├── prom/config.yml           # Prometheus scrape configs
+│   │   ├── grafana/config.yml        # Grafana datasources + dashboards
+│   │   └── traefik/config.yml        # Traefik reverse proxy routes
+│   └── nginx/nginx.conf              # Nginx reverse proxy fallback
+│
+├── services/                         # Microservices (48 Python files)
+│   ├── search-gateway/
+│   │   ├── main.py                   # FastAPI app — /providers, /search, /health
+│   │   ├── common/models.py          # SearchProvider, SearchResult, SortMethod enums
+│   │   ├── providers/
+│   │   │   └── provider_manager.py   # 13 providers, circuit breakers, rate limiter
+│   │   ├── ranking/
+│   │   │   └── result_ranker.py      # TF-IDF, domain authority, cosine similarity
+│   │   └── utils/
+│   │       └── system_components.py  # MetricsCollector, CircuitBreaker
+│   │
+│   ├── crawler/
+│   │   └── main.py                   # crawl4ai extraction + SQLite cache + forward to warehouse
+│   │
+│   ├── web-api/
+│   │   ├── main.py                   # 1,226 lines — aggregate, stream, warehouse proxy, ingest, facts, metrics
+│   │   └── app/static/index.html     # Web UI
+│   │
+│   ├── search-agent/
+│   │   ├── main.py                   # SynthesizerAgent — context-stuffing, citations, streaming
+│   │   └── common/
+│   │       ├── llm_client.py          # Multi-provider LLM client with fallback
+│   │       └── models.py             # Message, SearchResult, SynthesizeRequest
+│   │
+│   ├── vector-store/
+│   │   └── main.py                   # ChromaDB — /embed, /query endpoints
+│   │
+│   ├── knowledge-warehouse/
+│   │   └── main.py                   # SQLite FTS5 — store, search, list, stats
+│   │
+│   ├── deepsearch/                   # DEPRECATED — session management preserved
+│   │   ├── main.py                   # Proxy to web-api:8014
+│   │   ├── core/                     # Legacy search, scrape, RAG, synthesis modules
+│   │   ├── storage/sessions.py       # Session persistence
+│   │   ├── config/__init__.py        # Settings loader
+│   │   └── settings.yml              # Service configuration
+│   │
+│   └── searxng/
+│       └── settings.yml              # SearXNG instance configuration
+│
+├── sdk/                              # Client SDKs
+│   ├── client.py                     # Async httpx REST client
+│   ├── __init__.py                   # Package init
+│   └── python/
+│       ├── deepsearch.py             # DeepSearchClient — async + sync, crawl/search/completion
+│       ├── __init__.py
+│       ├── setup.py                  # pip install deepsearch-sdk
+│       ├── requirements.txt          # aiohttp, requests, pydantic
+│       ├── example.py                # Usage examples
+│       └── README.md                 # SDK documentation
+│
+├── libs/common/                      # Shared Python library
+│   ├── models.py                     # 13 providers, SortMethod, SearchResult, CrawlResult
+│   ├── config.py                     # Environment config loader
+│   ├── utils.py                      # Shared utilities
+│   ├── __init__.py
+│   ├── setup.py
+│   └── requirements.txt
+│
+├── scripts/                          # CLI tools (22 scripts)
+│   ├── dss.py                        # Main CLI — health, search, stream, ingest, facts, metrics
+│   ├── dss-docs.py                   # Universal document ingestion (9+ formats → warehouse)
+│   ├── dss-yt.py                     # YouTube ingest via yt-dlp (transcript + metadata)
+│   ├── dss-repo.py                   # GitHub repo → warehouse (structured source files)
+│   ├── dss-awesome.py                # Awesome-list ingestion (curated links → warehouse)
+│   ├── dss-overnight.py              # Bulk repo cloning + code extraction
+│   ├── dss-overnight-books.py        # Bulk PDF/paper ingestion (29 repos, 200 links each)
+│   ├── dss-backup.py                 # Warehouse DB backup via docker cp
+│   ├── dss-cleanup.py                # Warehouse garbage collection (word count filter)
+│   ├── dss-enrich.py                 # Content enrichment pipeline (quality, entities, dedup)
+│   ├── dss-smoke.py                  # SDK smoke test — warehouse, crawl, search
+│   ├── dss-view.py                   # Interactive warehouse content viewer
+│   ├── dss-health.sh                 # Quick health check script
+│   ├── dss-monitor.sh                # Live monitoring dashboard
+│   ├── test.sh                       # Full test suite runner
+│   ├── test_suite.sh                 # Integration test suite
+│   ├── test_deepsearch.sh            # DeepSearch-specific tests
+│   ├── test_gateway.sh               # Gateway integration tests
+│   ├── test_gateways.sh              # Multi-gateway tests
+│   ├── chain_test_client.sh          # Pipeline chain test
+│   ├── client.py / client.sh         # Debug CLI clients
+│   └── init_cpp_service.sh           # C++ microservice scaffold generator
+│
+├── examples/                         # Usage examples
+│   ├── query_search_agent.py         # End-to-end search + synthesis
+│   ├── deepsearch_example.py         # DeepSearch API usage
+│   ├── query_llm.py                  # Direct LLM gateway query
+│   ├── crawler_example.py            # Crawler service usage
+│   ├── chain_search.py               # Multi-step pipeline chain
+│   ├── case_study_agent.py           # Case study generation
+│   └── reporter_agent.py             # Research report generation
+│
+├── benchmarks/
+│   ├── base/
+│   │   ├── run_benchmarks.py         # Load test runner
+│   │   ├── load_test.py              # Concurrent request load testing
+│   │   ├── stress_test.sh            # Stress test script
+│   │   └── BENCHMARK-REPORT.md       # Baseline performance report
+│   └── realistic/
+│       ├── business_intelligence_bench.py  # 70-query BI pipeline benchmark
+│       ├── SUMMARY.md                     # Results: 77.3% success, 32 ops/min, 1.81s avg
+│       └── intelligence_benchmark_*.json  # Raw benchmark results (5 runs)
+│
+├── testing/                          # Integration test suite
+│   ├── test_integration.py           # Full pipeline integration tests
+│   ├── test_gateways.py              # Gateway provider tests
+│   ├── test_api.py                   # API endpoint tests
+│   ├── test_crawler.py               # Crawler service tests
+│   ├── test_openwebui.py             # Web UI tests
+│   ├── health_check.sh               # Service health verification
+│   ├── wait-for-it.sh                # Service readiness check
+│   ├── Dockerfile                    # Test container image
+│   ├── pytest.ini                    # Pytest configuration
+│   └── requirements.txt              # Test dependencies (pytest, httpx, pytest-httpx)
+│
+├── tests/e2e/                        # End-to-end test scripts
+│   ├── health_check.sh               # Full stack health check
+│   ├── starter.sh                    # Stack bootstrap + verify
+│   └── pytest.ini                    # Pytest config for E2E
+│
+├── workflows/                        # Reusable pipeline scripts
+│   └── documentation-aggregator/
+│       ├── main.py                   # Documentation ingestion workflow
+│       ├── requirements.txt
+│       └── README.md
+│
+├── templates/cpp-microservice/       # C++ microservice scaffold
+│   ├── CMakeLists.txt
+│   ├── Dockerfile
+│   ├── Makefile
+│   ├── README.md
+│   ├── src/                          # http_server, config_manager, microservice, user_model, database
+│   ├── include/                      # Header files for all modules
+│   ├── tests/                        # test_microservice.cpp
+│   └── examples/                     # custom_endpoint, user_service examples
+│
+├── firefox-extension/
+│   └── manifest.json                 # Browser extension manifest
+│
+├── docker-compose.yml                # Root compose (full stack)
+├── Makefile                          # Master Control Program (318 lines)
+├── .env.example                      # Environment template
+└── README.md                         # This file
+```
+
+---
+
+## Makefile — Master Control Program
+
+### Stacks
+| Stack | Compose file | Services |
+|-------|-------------|----------|
+| `dss-full` | `infra/dss-full.compose.yml` | Full — nginx, postgres, redis, searxng, whoogle, yacy, search-gateway, deepsearch, vector-store, crawler, knowledge-warehouse, search-agent, web-api |
+| `dss-light` | `infra/dss-light.compose.yml` | Minimal — nginx, postgres, redis, deepsearch, vector-store, crawler |
+| `dss-test` | `infra/dss-test.compose.yml` | Testing — nginx, postgres, redis, searxng, whoogle, yacy, search-gateway, deepsearch, vector-store, crawler |
+| `full` | `docker-compose.yml` | Root compose |
+
+### Commands
+```bash
+# Lifecycle
+make up STACK=dss              # Boot stack
+make down STACK=dss            # Stop + remove containers
+make restart STACK=dss         # Restart all
+make stop STACK=dss            # Stop without removing
+make start STACK=dss           # Start stopped containers
+
+# Build
+make build STACK=dss           # Build images (Docker layer cache)
+make rebuild STACK=dss         # Rebuild from scratch (no cache)
+make re STACK=dss              # Build + restart
+make rere STACK=dss            # Rebuild (no cache) + restart
+
+# Monitoring
+make status STACK=dss          # Container status table
+make logs STACK=dss            # Tail logs (all services)
+make logs STACK=dss service=crawler  # Tail specific service
+make health STACK=dss          # Health status JSON
+make list-stacks               # Full dashboard — all stacks, service health trees
+
+# Debug
+make shell STACK=dss service=crawler  # Interactive shell in container
+make exec STACK=dss service=crawler cmd="env"  # Run command in container
+
+# Cleanup
+make clean STACK=dss           # Down + remove orphans
+make fclean STACK=dss          # Down + remove volumes
+make prune                     # Full system prune (interactive confirmation)
+
+# Shortcuts
+make core                      # = up STACK=dss
+make core-down                 # = down STACK=dss
+make core-restart              # = restart STACK=dss
+```
+
+---
+
+## Quick Start
 
 ```bash
+# 1. Configure
 cp .env.example .env
-```
+# Add DEEPSEEK_API_KEY
 
-*Optional:* To enable external providers, edit the `.env` file and add your API keys:
-```env
-# In your .env file
-ENABLE_GEMINI=true
-ENABLE_GROQ=true
-GEMINI_API_KEY="your_gemini_api_key_here"
-GROQ_API_KEY="your_groq_api_key_here"
-```
+# 2. Boot
+make up STACK=dss
+make status STACK=dss              # Wait for all healthy
 
-**3. Run the Stack**
-This command will build the Docker images and start all services in the correct order. The first time you run this, Ollama will download the default models, which may take several minutes.
-
-```bash
-make up
-```
-
-**4. Query the Agent!**
-Once all services are healthy, you can query the `search-agent`:
-```bash
+# 3. Test
+curl -s http://localhost:8014/health | python3 -m json.tool
 python3 examples/query_search_agent.py
 ```
 
-**5. Access the Web Interface**
-Open your browser and navigate to `http://localhost:3000` to access the OpenWebUI interface for chatting with your LLMs.
+---
+
+## CLI — `dss.py`
+
+```bash
+python3 scripts/dss.py health              # Health check all services
+python3 scripts/dss.py search "query"       # Aggregate search
+python3 scripts/dss.py stream "query"       # Streaming search (SSE)
+python3 scripts/dss.py list [--domain x]    # Warehouse listing (newest first)
+python3 scripts/dss.py content <id>         # View warehouse entry
+python3 scripts/dss.py facts [query]        # Query consensus fact DB
+python3 scripts/dss.py ingest url1 url2...  # Bulk URL ingestion
+python3 scripts/dss.py crawl <url>          # Single URL crawl
+python3 scripts/dss.py warehouse [query]    # Warehouse stats or search
+python3 scripts/dss.py feed <rss_url>       # Ingest RSS/Atom feed
+python3 scripts/dss.py metrics             # Service metrics snapshot
+
+# Specialized tools
+python3 scripts/dss-docs.py ...             # Document ingestion (PDF, DOCX, MD, HTML, etc.)
+python3 scripts/dss-yt.py ...               # YouTube video/playlist ingest
+python3 scripts/dss-repo.py ...             # GitHub repo → warehouse
+python3 scripts/dss-awesome.py ...          # Awesome-list ingestion
+python3 scripts/dss-overnight.py ...        # Bulk code repos
+python3 scripts/dss-overnight-books.py ...  # Bulk PDF/paper repos
+python3 scripts/dss-backup.py               # Warehouse DB backup
+python3 scripts/dss-cleanup.py              # Warehouse garbage collection
+python3 scripts/dss-enrich.py               # Content quality enrichment
+python3 scripts/dss-smoke.py               # SDK integration smoke test
+python3 scripts/dss-view.py                # Interactive warehouse browser
+```
 
 ---
 
-## ⚙️ Configuration
+## Python SDK
 
-All configuration is managed through the `.env` file.
+```python
+from deepsearch import DeepSearchClient, SyncDeepSearchClient
 
-| Variable                 | Description                                                                 | Default      |
-| ------------------------ | --------------------------------------------------------------------------- | ------------ |
-| `ENABLE_GEMINI`          | Set to `true` to enable the Google Gemini provider.                         | `false`      |
-| `ENABLE_GROQ`            | Set to `true` to enable the Groq Cloud provider.                            | `false`      |
-| `GEMINI_API_KEY`         | Your API key for Google Gemini.                                             | `""`         |
-| `GROQ_API_KEY`           | Your API key for Groq Cloud.                                                | `""`         |
-| `OLLAMA_MODELS_PULL`     | Comma-separated list of models for the Ollama service to pull on startup.   | `gemma:2b,codellama`  |
-| `OLLAMA_DEFAULT_MODEL`   | The model the `llm-gateway` will request from Ollama. **Must be in `OLLAMA_MODELS`**. | `gemma3:1b`  |
-| `POSTGRES_DB`            | The name of the PostgreSQL database.                                        | `searchdb`   |
-| `POSTGRES_USER`          | The username for the PostgreSQL database.                                   | `searchuser` |
-| `POSTGRES_PASSWORD`      | The password for the PostgreSQL database.                                   | `searchpass` |
-| `OPENWEBUI_PORT`         | The port on which OpenWebUI will be accessible.                             | `3000`       |
+# Async (recommended)
+async with DeepSearchClient(base_url="http://localhost:8014") as client:
+    # Crawl
+    result = await client.crawl("https://example.com", formats=["markdown"])
+    print(result.content)
 
-## 🛠️ Usage & Management
+    # Search
+    results = await client.search("What is attention mechanism?", max_results=10)
+    for r in results:
+        print(f"[{r.source}] {r.title}")
 
-The `Makefile` is your primary tool for managing the stack.
+    # LLM completion
+    answer = await client.llm_complete([
+        {"role": "user", "content": "Explain quantum computing in 2 paragraphs."}
+    ])
 
-| Command             | Description                                                              |
-| ------------------- | ------------------------------------------------------------------------ |
-| `make up`           | Start all services in detached mode.                                     |
-| `make down`         | Stop and remove all services and networks.                               |
-| `make logs`         | Follow the logs of all running services.                                 |
-| `make logs service=<name>` | Follow the logs of a specific service (e.g., `llm-gateway-1`). |
-| `make re`           | Rebuild all Docker images and restart the stack.                         |
-| `make stop`         | Stop all services without removing them.                                 |
-| `make test`         | Run the integration test suite against the running stack.                |
-| `make ssh service=<name>`  | Get an interactive shell inside a running service container.      |
-| `make prune`        | A deep clean that stops the stack and removes all volumes and images.    |
-
-### API Examples
-
-You can interact with the services directly via `curl`.
-
-**Check LLM Gateway Health & Providers:**
-```bash
-curl http://localhost:8080/health
-curl http://localhost:8080/providers
+# Sync (simple scripts)
+from deepsearch import crawl_sync, search_sync, llm_complete_sync
+content = crawl_sync("https://example.com")
+results = search_sync("AI research")
+answer = llm_complete_sync([{"role": "user", "content": "Hello"}])
 ```
 
-**Send a Completion Request to a Specific Provider:**
-```bash
-curl -X POST http://localhost:8080/completion \
-  -H "Content-Type: application/json" \
-  -d '{
-    "provider": "groq",
-    "messages": [{"role": "user", "content": "What is the capital of Spain?"}]
-  }'
-```
-
-**Perform an End-to-End Search:**
-```bash
-curl -X POST http://localhost:8001/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What are the core principles of responsive web design?"}'
-```
-
-**Access OpenWebUI:**
-Open your browser and navigate to `http://localhost:3000` to access the web interface.
+Install: `cd sdk/python && pip install -e .` or `pip install deepsearch-sdk`
 
 ---
 
-## 🔬 Development Guide
+## API Reference — web-api (:8014)
 
-Interested in contributing? Here's how to get started.
+### Aggregation
 
-**Project Structure:**
-```
-.
-├── docker-compose.yml       # Main Docker Compose file
-├── .env.example             # Environment variable template
-├── Makefile                 # Management commands
-├── llm_gateway/             # The resilient, multi-provider LLM gateway
-├── search-agent/            # Core agent logic for search and synthesis
-├── vector-store/            # RAG-enabling vector database service
-├── crawler/                 # Web crawling service with crawl4ai
-├── openwebui/               # Web interface for chatting with LLMs
-├── testing/                 # Pytest integration tests
-├── examples/                # Example client scripts
-└── ... (other service directories)
-```
-
-**Running Tests:**
-Ensure the stack is running, then execute the test script:
 ```bash
-# This script loads the .env file and runs a full suite of tests.
-./test.sh
+# Aggregate search across providers
+POST /api/aggregate
+{
+  "query": "attention mechanism",
+  "max_results": 10,
+  "include_warehouse": true,
+  "reconcile": true
+}
+
+# Streaming aggregate (SSE)
+POST /api/aggregate/stream
+{"query": "transformer architecture"}
+→ event: result, event: done
 ```
 
-## 💻 Technology Stack
+### Search + Synthesis
 
-| Component         | Technology                               |
-| ----------------- | ---------------------------------------- |
-| **Orchestration** | Docker, Docker Compose                   |
-| **Backend API**   | Python, FastAPI, Uvicorn                 |
-| **LLM Gateway**   | httpx (async requests), Pydantic         |
-| **Local LLM**     | Ollama                                   |
-| **Vector Store**  | ChromaDB, Sentence-Transformers          |
-| **Metadata Store**| PostgreSQL                               |
-| **Search Engines**| Whoogle, SearXNG, YaCy                   |
-| **Web Crawling**  | crawl4ai, Playwright                     |
-| **Testing**       | Pytest, pytest-httpx                     |
+```bash
+# Streaming search with LLM synthesis (SSE)
+POST /api/search/stream
+{
+  "query": "what is RAG",
+  "max_results": 5,
+  "synthesis_provider": "deepseek"
+}
+→ event: chunk (text), event: source (url + title), event: done
 
-## 🗺️ Roadmap
+# Direct LLM completion stream
+POST /api/completion/stream
+{
+  "messages": [{"role": "user", "content": "Explain...")}],
+  "provider": "deepseek"
+}
+→ event: chunk, event: done
+```
 
-We have an ambitious vision for this project. Our high-level goals are outlined in our **[ROADMAP.md](ROADMAP.md)** file, which includes plans for a full RAG pipeline, conversational memory, multi-modal search, and a rich web UI.
+### Warehouse
 
-## 🤝 Contributing
+```bash
+GET /api/warehouse/list?limit=20&domain=arxiv.org       # Paginated listing
+GET /api/warehouse/stats                                  # Entry count, domains
+GET /api/warehouse/search?q=transformers&limit=10        # FTS5 full-text search
+GET /api/warehouse/content/42                             # Single entry by ID
+```
 
-Contributions are welcome! Whether it's improving documentation, adding a new search provider, or implementing a new feature from the roadmap, we'd love your help. Please read our (forthcoming) `CONTRIBUTING.md` for guidelines.
+### Ingestion
 
-## 📄 License
+```bash
+POST /api/ingest/urls
+{
+  "urls": ["https://example.com/article1", "https://example.com/article2"],
+  "crawl": true
+}
 
-This project is licensed under the MIT License. See the **[LICENSE](LICENSE)** file for details.
+POST /api/ingest/feed
+{
+  "feed_url": "https://blog.example.com/rss",
+  "limit": 20
+}
+```
+
+### Operational
+
+```bash
+GET /health                               # Service health
+GET /api/metrics                          # Request counts, latency, gauges
+GET /api/providers                        # Provider health listing
+GET /api/facts?q=bitcoin                   # Consensus fact DB query
+GET /ui                                    # Web UI
+```
+
+---
+
+## Benchmarks
+
+### Business Intelligence Pipeline
+70-query realistic benchmark suite against the full pipeline:
+
+| Metric | Value |
+|--------|-------|
+| Success rate | 77.3% (17/22 operations) |
+| Total duration | 41.12s |
+| Throughput | 32.10 ops/min |
+| Avg response time | 1.81s |
+| Crawler reliability | 100% (10/10) |
+| Search gateway | 100% (5/5) |
+| LLM completion | 57% (3/7) — provider config dependent |
+
+```bash
+cd benchmarks/realistic
+python3 business_intelligence_bench.py    # Run 70-query suite
+# Results: intelligence_benchmark_*.json
+```
+
+### Base Load Tests
+```bash
+cd benchmarks/base
+python3 run_benchmarks.py                 # Concurrent load testing
+bash stress_test.sh                       # Shell-based stress test
+```
+
+---
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEEPSEEK_API_KEY` | — | LLM provider key (inference-gateway) |
+| `POSTGRES_DB` | `searchdb` | PostgreSQL database name |
+| `POSTGRES_USER` | `searchuser` | PostgreSQL user |
+| `POSTGRES_PASSWORD` | `searchpass` | PostgreSQL password |
+
+---
+
+## Documentation
+
+| File | Content |
+|------|---------|
+| [docs/deepsearch-architecture.md](docs/deepsearch-architecture.md) | Architecture deep-dive |
+| [docs/deepsearch-implementation-summary.md](docs/deepsearch-implementation-summary.md) | Implementation details |
+| [docs/QUICKSTART-DEEPSEARCH.md](docs/QUICKSTART-DEEPSEARCH.md) | Getting started guide |
+| [docs/crawler-guide.md](docs/crawler-guide.md) | Crawler service guide |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Version history |
+| [docs/TODO.md](docs/TODO.md) | Sprint plan & roadmap |
+
+---
+
+## License
+
+MIT

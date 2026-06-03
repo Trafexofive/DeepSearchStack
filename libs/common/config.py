@@ -14,9 +14,9 @@ SERVICE_CONFIG = {
         "env_var": "SEARCH_GATEWAY_URL",
         "health_endpoint": "/health"
     },
-    "llm_gateway": {
-        "default_url": "http://llm-gateway:8080",
-        "env_var": "LLM_GATEWAY_URL", 
+    "inference_gateway": {
+        "default_url": "http://inference_gateway:8005",
+        "env_var": "INFERENCE_GATEWAY_URL", 
         "health_endpoint": "/health"
     },
     "vector_store": {

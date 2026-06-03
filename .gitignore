@@ -27,6 +27,8 @@ __pycache__/
 *.pyd
 .Python
 env/
+# But keep infra/env/ (DSS config templates)
+!infra/env/
 venv/
 ENV/
 env.bak/

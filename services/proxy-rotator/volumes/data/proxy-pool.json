@@ -1,0 +1,313 @@
+{
+  "updated": "2026-06-01T19:57:18.870668+00:00",
+  "count": 51,
+  "proxies": [
+    {
+      "host": "tor",
+      "port": 9050,
+      "protocol": "socks5",
+      "latency_ms": 0,
+      "type": "tor"
+    },
+    {
+      "host": "104.21.29.189",
+      "port": 443,
+      "protocol": "http",
+      "latency_ms": 385
+    },
+    {
+      "host": "185.135.69.34",
+      "port": 80,
+      "protocol": "http",
+      "latency_ms": 830
+    },
+    {
+      "host": "138.68.60.8",
+      "port": 3128,
+      "protocol": "http",
+      "latency_ms": 950
+    },
+    {
+      "host": "45.43.81.9",
+      "port": 5656,
+      "protocol": "http",
+      "latency_ms": 1097
+    },
+    {
+      "host": "142.147.128.90",
+      "port": 6590,
+      "protocol": "http",
+      "latency_ms": 1180
+    },
+    {
+      "host": "216.10.27.44",
+      "port": 6722,
+      "protocol": "http",
+      "latency_ms": 1416
+    },
+    {
+      "host": "31.59.20.208",
+      "port": 6786,
+      "protocol": "http",
+      "latency_ms": 1655
+    },
+    {
+      "host": "159.203.61.169",
+      "port": 3128,
+      "protocol": "http",
+      "latency_ms": 1691
+    },
+    {
+      "host": "145.223.58.219",
+      "port": 6488,
+      "protocol": "http",
+      "latency_ms": 1803
+    },
+    {
+      "host": "146.103.3.92",
+      "port": 7145,
+      "protocol": "http",
+      "latency_ms": 1919
+    },
+    {
+      "host": "82.22.235.147",
+      "port": 6953,
+      "protocol": "http",
+      "latency_ms": 2039
+    },
+    {
+      "host": "162.220.246.229",
+      "port": 6513,
+      "protocol": "http",
+      "latency_ms": 2101
+    },
+    {
+      "host": "82.22.211.64",
+      "port": 5872,
+      "protocol": "http",
+      "latency_ms": 2177
+    },
+    {
+      "host": "104.207.40.119",
+      "port": 3129,
+      "protocol": "http",
+      "latency_ms": 2242
+    },
+    {
+      "host": "34.36.225.209",
+      "port": 80,
+      "protocol": "http",
+      "latency_ms": 2263
+    },
+    {
+      "host": "23.247.136.254",
+      "port": 80,
+      "protocol": "http",
+      "latency_ms": 2272
+    },
+    {
+      "host": "104.143.224.182",
+      "port": 6043,
+      "protocol": "http",
+      "latency_ms": 2285
+    },
+    {
+      "host": "142.111.104.171",
+      "port": 6181,
+      "protocol": "http",
+      "latency_ms": 2322
+    },
+    {
+      "host": "147.45.75.124",
+      "port": 8080,
+      "protocol": "http",
+      "latency_ms": 2453
+    },
+    {
+      "host": "107.181.154.8",
+      "port": 5686,
+      "protocol": "http",
+      "latency_ms": 2455
+    },
+    {
+      "host": "154.6.11.182",
+      "port": 5651,
+      "protocol": "http",
+      "latency_ms": 2558
+    },
+    {
+      "host": "67.227.42.225",
+      "port": 6202,
+      "protocol": "http",
+      "latency_ms": 2566
+    },
+    {
+      "host": "38.154.191.236",
+      "port": 8813,
+      "protocol": "http",
+      "latency_ms": 2750
+    },
+    {
+      "host": "104.253.48.75",
+      "port": 5499,
+      "protocol": "http",
+      "latency_ms": 2817
+    },
+    {
+      "host": "146.103.5.20",
+      "port": 6600,
+      "protocol": "http",
+      "latency_ms": 2903
+    },
+    {
+      "host": "82.22.211.224",
+      "port": 6032,
+      "protocol": "http",
+      "latency_ms": 2990
+    },
+    {
+      "host": "8.210.17.35",
+      "port": 8004,
+      "protocol": "http",
+      "latency_ms": 3058
+    },
+    {
+      "host": "47.91.89.3",
+      "port": 11,
+      "protocol": "http",
+      "latency_ms": 3153
+    },
+    {
+      "host": "8.209.96.245",
+      "port": 8080,
+      "protocol": "http",
+      "latency_ms": 3157
+    },
+    {
+      "host": "8.130.36.163",
+      "port": 3128,
+      "protocol": "http",
+      "latency_ms": 3226
+    },
+    {
+      "host": "47.76.144.139",
+      "port": 9080,
+      "protocol": "http",
+      "latency_ms": 3272
+    },
+    {
+      "host": "46.29.162.166",
+      "port": 80,
+      "protocol": "http",
+      "latency_ms": 3324
+    },
+    {
+      "host": "104.207.45.9",
+      "port": 3129,
+      "protocol": "http",
+      "latency_ms": 3375
+    },
+    {
+      "host": "172.120.119.16",
+      "port": 5676,
+      "protocol": "http",
+      "latency_ms": 3664
+    },
+    {
+      "host": "8.211.195.139",
+      "port": 4145,
+      "protocol": "http",
+      "latency_ms": 3805
+    },
+    {
+      "host": "143.95.110.59",
+      "port": 80,
+      "protocol": "http",
+      "latency_ms": 3832
+    },
+    {
+      "host": "47.251.87.199",
+      "port": 9080,
+      "protocol": "http",
+      "latency_ms": 3927
+    },
+    {
+      "host": "190.94.212.228",
+      "port": 999,
+      "protocol": "http",
+      "latency_ms": 3985
+    },
+    {
+      "host": "47.76.144.139",
+      "port": 3129,
+      "protocol": "http",
+      "latency_ms": 4215
+    },
+    {
+      "host": "65.155.249.100",
+      "port": 8080,
+      "protocol": "http",
+      "latency_ms": 4296
+    },
+    {
+      "host": "104.238.50.195",
+      "port": 6741,
+      "protocol": "http",
+      "latency_ms": 4332
+    },
+    {
+      "host": "128.140.113.110",
+      "port": 4145,
+      "protocol": "http",
+      "latency_ms": 4382
+    },
+    {
+      "host": "8.130.74.114",
+      "port": 80,
+      "protocol": "http",
+      "latency_ms": 4404
+    },
+    {
+      "host": "8.211.195.173",
+      "port": 20002,
+      "protocol": "http",
+      "latency_ms": 4725
+    },
+    {
+      "host": "173.211.30.146",
+      "port": 6580,
+      "protocol": "http",
+      "latency_ms": 4814
+    },
+    {
+      "host": "8.211.194.85",
+      "port": 312,
+      "protocol": "http",
+      "latency_ms": 4895
+    },
+    {
+      "host": "198.37.99.82",
+      "port": 5873,
+      "protocol": "http",
+      "latency_ms": 4927
+    },
+    {
+      "host": "8.220.136.174",
+      "port": 1080,
+      "protocol": "http",
+      "latency_ms": 4933
+    },
+    {
+      "host": "192.3.48.37",
+      "port": 6030,
+      "protocol": "http",
+      "latency_ms": 4933
+    },
+    {
+      "host": "198.105.111.29",
+      "port": 6707,
+      "protocol": "http",
+      "latency_ms": 4955
+    }
+  ]
+}

@@ -55,9 +55,9 @@ class Config:
     def _convert_type(self, value: str) -> Any:
         """Convert string environment variable to appropriate type"""
         # Boolean
-        if value.lower() in ('true', 'yes', '1', 'on'):
+        if value.lower() in ('true', 'yes', '1'):
             return True
-        if value.lower() in ('false', 'no', '0', 'off'):
+        if value.lower() in ('false', 'no', '0'):
             return False
 
         # Number

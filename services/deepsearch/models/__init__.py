@@ -22,9 +22,10 @@ class SortMethod(str, Enum):
 
 
 class LLMProvider(str, Enum):
-    OLLAMA = "ollama"
-    GROQ = "groq"
-    GEMINI = "gemini"
+    """Available LLM providers via inference-gateway."""
+    DEEPSEEK = "deepseek"
+    DEEPSEEK_CHAT = "deepseek-chat"
+    DEEPSEEK_REASONER = "deepseek-reasoner"
 
 
 # --- Core Models ---
@@ -181,6 +182,36 @@ class HealthCheck(BaseModel):
     dependencies: Dict[str, bool]
     cache_enabled: bool
     rag_enabled: bool
+
+
+class RecursiveResearchRequest(BaseModel):
+    """Multi-iteration recursive research — Local Deep Research pattern.
+
+    Iterates: search → scrape → analyze gaps → refine query → repeat.
+    Final iteration synthesizes from all accumulated context.
+    """
+    query: str = Field(..., description="Initial research question")
+    max_iterations: int = Field(3, ge=1, le=5, description="Max research iterations")
+    max_results_per_iter: int = Field(10, ge=3, le=50)
+    max_scrape_per_iter: int = Field(5, ge=1, le=20)
+    providers: Optional[List[SearchProvider]] = None
+    llm_provider: Optional[LLMProvider] = None
+    temperature: Optional[float] = None
+    session_id: Optional[str] = None
+    stream: bool = Field(True, description="Stream progress + content")
+
+
+class RecursiveResearchResponse(BaseModel):
+    """Complete recursive research response."""
+    query: str
+    answer: str
+    iterations: int
+    all_sources: List[SearchResult]
+    all_scraped: Optional[List[ScrapedContent]] = None
+    refinement_queries: List[str] = []
+    session_id: Optional[str] = None
+    execution_time: float
+    tokens_used: Optional[int] = None
 
 
 class ServiceMetrics(BaseModel):

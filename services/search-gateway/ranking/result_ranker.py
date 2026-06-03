@@ -53,18 +53,38 @@ class ResultRanker:
         return results
         
     def rank_results(self, query: str, results: List[SearchResult], sort_method: SortMethod = SortMethod.RELEVANCE) -> List[SearchResult]:
-        """Rank search results based on the specified method"""
+        """Rank search results with provider diversity — ensures representation from each source."""
         if not results: return []
         results = self._calculate_relevance_score(query, results)
         results = self._apply_domain_authority(results)
-        
+
         if sort_method == SortMethod.RELEVANCE:
             results.sort(key=lambda x: x.confidence, reverse=True)
         elif sort_method == SortMethod.DATE:
             results.sort(key=lambda x: (x.published_date or "", x.confidence), reverse=True)
         elif sort_method == SortMethod.SOURCE_QUALITY:
             results.sort(key=lambda x: (x.domain_authority or 0, x.confidence), reverse=True)
-        
-        for i, result in enumerate(results):
+
+        # Provider-aware diversification: interleave top results from each source
+        from collections import defaultdict
+        by_source = defaultdict(list)
+        for r in results:
+            by_source[r.source].append(r)
+
+        # Sort each source's results internally by confidence
+        for src in by_source:
+            by_source[src].sort(key=lambda x: x.confidence, reverse=True)
+
+        # Round-robin interleave from all sources
+        sources = sorted(by_source.keys())
+        diversified = []
+        idx = 0
+        while any(idx < len(by_source[s]) for s in sources):
+            for s in sources:
+                if idx < len(by_source[s]):
+                    diversified.append(by_source[s][idx])
+            idx += 1
+
+        for i, result in enumerate(diversified):
             result.rank = i + 1
-        return results
+        return diversified
