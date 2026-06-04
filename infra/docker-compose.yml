@@ -285,7 +285,7 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
-      - ./services/inference-gateway/config:/app/config:ro
+      - ../services/inference-gateway/config:/app/config:ro
     ports:
       - "8005:8005"
     healthcheck:

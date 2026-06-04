@@ -27,10 +27,10 @@ from search_gateway.utils.system_components import MetricsCollector, CircuitBrea
 
 logger = logging.getLogger("providers.provider_manager")
 
-HEADERS = {"User-Agent": "DeepSearchStack/1.0 (research bot; contact@substrate.local)"}
+HEADERS = {"User-Agent": "DeepSearchStack/1.0 (research bot; contact@deepsearchstack.local)"}
 
 # Reddit requires a specific User-Agent format — blocks generic ones with 403
-REDDIT_HEADERS = {"User-Agent": "python:substrate.deepsearch:v1.0 (by /u/substrate_bot)"}
+REDDIT_HEADERS = {"User-Agent": "python:deepsearchstack:v1.0 (by /u/deepsearch_bot)"}
 
 # arXiv rate limiting — max 1 request per 3s per their ToS
 _ARXIV_LAST_REQUEST = 0.0

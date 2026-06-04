@@ -25,4 +25,4 @@ services:
 networks:
   bridge-net:
     external: true
-    name: infra_substrate-net
+    name: deepsearch_net

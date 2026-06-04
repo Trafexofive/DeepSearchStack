@@ -293,26 +293,41 @@ help:
 	@echo -e "  prune                - Full system prune (interactive)"
 	@echo ""
 	@echo -e "$(YELLOW)Examples:$(NC)"
-	@echo -e "  make up STACK=core"
-	@echo -e "  make logs STACK=core service=nginx-proxy-manager"
-	@echo -e "  make restart STACK=services service=glance"
-	@echo -e "  make shell STACK=core service=ddclient"
+	@echo -e "  make up STACK=full"
+	@echo -e "  make logs STACK=full service=deepsearch"
+	@echo -e "  make restart STACK=full service=search-agent"
+	@echo -e "  make shell STACK=full service=inference-gateway"
 	@echo ""
 	@echo -e "$(GRAY)All operations support STACK= and service= parameters$(NC)"
 	@echo -e "$(BLUE)=========================================================================$(NC)"
 
 # ======================================================================================
-# STACK-SPECIFIC SHORTCUTS (examples - build on generic foundation)
+# DSS-SPECIFIC SHORTCUTS
 # ======================================================================================
 
-core:
-	@$(MAKE) up STACK=core
-	@$(MAKE) up STACK=services
+full:
+	@$(MAKE) up STACK=full
 
-core-down:
-	@$(MAKE) down STACK=services
-	@$(MAKE) down STACK=core
+full-down:
+	@$(MAKE) down STACK=full
 
-core-restart:
-	@$(MAKE) restart STACK=core
-	@$(MAKE) restart STACK=services
+full-restart:
+	@$(MAKE) restart STACK=full
+
+light:
+	@$(MAKE) up STACK=light
+
+light-down:
+	@$(MAKE) down STACK=light
+
+light-restart:
+	@$(MAKE) restart STACK=light
+
+test:
+	@$(MAKE) up STACK=test
+
+test-down:
+	@$(MAKE) down STACK=test
+
+test-restart:
+	@$(MAKE) restart STACK=test
