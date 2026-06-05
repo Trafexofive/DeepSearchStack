@@ -264,6 +264,7 @@ services:
       - CRAWLER_URL=http://crawler:8000
       - VECTOR_STORE_URL=http://vector-store:8004
       - REDIS_URL=redis://redis:6379/0
+      - AGGREGATE_PROVIDERS=${AGGREGATE_PROVIDERS:-}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8014/health')"]
       interval: 15s
