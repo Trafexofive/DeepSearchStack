@@ -1,320 +1,786 @@
 """
-DeepSearchStack - Python SDK
-Easy-to-use client for interacting with DeepSearchStack services
+DeepSearchStack - Python SDK v2
+Comprehensive client for the full DeepSearchStack pipeline.
+Async-first, with a sync wrapper for scripts.
+
+EPIC 5.5.2: This is the SDK contract the TUI depends on. Every
+method the TUI needs is here, plus streaming variants where
+applicable. Errors are returned as (result, error) tuples — the
+TUI never has to wrap calls in try/except for transport errors.
+
+Usage (async):
+    async with AsyncDeepSearchClient("http://localhost:8083") as client:
+        models, err = await client.list_models()
+        if err:
+            print(f"failed: {err}")
+            return
+        result, err = await client.search("what is rust", providers=["searxng"])
+        async for chunk in client.synthesize_stream("what is rust", sources=result):
+            print(chunk, end="")
+
+Usage (sync):
+    with DeepSearchClient("http://localhost:8083") as client:
+        models, err = client.list_models()
+        result, err = client.search("what is rust")
+        text = client.llm_complete([{"role": "user", "content": "hi"}])
 """
+
+from __future__ import annotations
 
 import asyncio
 import json
-from typing import Dict, List, Optional, Union, Any
-from dataclasses import dataclass
-import aiohttp
-import requests
+import os
+import warnings
+from dataclasses import dataclass, field
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
+
+import httpx
+
+
+# ─── Type aliases ────────────────────────────────────────────────────────
+
+# An "error envelope" — every method returns (result, error). The error
+# is None on success, or a string describing the failure. The TUI
+# pattern-matches on this and never has to wrap calls in try/except
+# for transport-layer failures.
+Result = Tuple[Any, Optional[str]]
+
+
+# ─── Result dataclasses ─────────────────────────────────────────────────
 
 
 @dataclass
 class CrawlResult:
-    """Result from a crawl operation"""
+    """Result from a crawl operation."""
     url: str
     content: str
-    extracted_data: Optional[Dict] = None
+    markdown: Optional[str] = None
+    title: Optional[str] = None
     success: bool = True
     error_message: Optional[str] = None
+    word_count: int = 0
+    extracted_at: Optional[str] = None
+
+
+@dataclass
+class SearchHit:
+    """A single search result."""
+    title: str
+    url: str
+    description: str
+    source: str
+    confidence: float = 1.0
+    snippet: Optional[str] = None
+    domain_authority: Optional[float] = None
+    rank: Optional[int] = None
+    published_date: Optional[str] = None
 
 
 @dataclass
 class SearchResult:
-    """Result from a search operation"""
+    """Result from a search operation."""
     query: str
-    results: List[Dict]
-    sources: List[str]
-    timestamp: str
+    hits: List[SearchHit] = field(default_factory=list)
+    provider_results: Dict[str, List[SearchHit]] = field(default_factory=dict)
+    elapsed_seconds: float = 0.0
+
+
+@dataclass
+class SynthesizedChunk:
+    """One chunk from a streaming synthesis."""
+    content: str
+    finished: bool = False
+    warning: Optional[str] = None  # citation validation warning, set near end
+
+
+@dataclass
+class ModelInfo:
+    """A model in the inference-gateway catalog."""
+    id: str
+    provider: str
+    owned_by: str = ""
+    context_length: Optional[int] = None
+
+
+@dataclass
+class EmbedResult:
+    """Result from an /embed call."""
+    ids: List[str]
+    count: int
+
+
+@dataclass
+class WarehouseHit:
+    """A hit from knowledge-warehouse /search."""
+    id: int
+    url: str
+    title: Optional[str]
+    snippet: Optional[str]
+    source_domain: Optional[str]
+    word_count: int
+    ingested_at: str
+
+
+# ─── Async client ───────────────────────────────────────────────────────
+
+
+class AsyncDeepSearchClient:
+    """Async client for DeepSearchStack. Use as `async with`."""
+
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8083",
+        timeout: float = 30.0,
+        default_model: str = "virtual/free-coder",
+        llm_base_url: Optional[str] = None,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.default_model = default_model
+        # The LLM gateway isn't exposed via nginx — it lives on
+        # port 8005 directly. If llm_base_url isn't given, infer it
+        # from the main base_url by swapping the port to 8005.
+        if llm_base_url:
+            self.llm_base_url = llm_base_url.rstrip("/")
+        else:
+            from urllib.parse import urlsplit, urlunsplit
+            parts = urlsplit(self.base_url)
+            new_netloc = parts.netloc.rsplit(":", 1)[0] + ":8005" if ":" in parts.netloc else parts.netloc + ":8005"
+            self.llm_base_url = urlunsplit((parts.scheme, new_netloc, "", "", ""))
+        self._client: Optional[httpx.AsyncClient] = None
+        self._timeout = timeout
+
+    async def __aenter__(self) -> "AsyncDeepSearchClient":
+        self._client = httpx.AsyncClient(timeout=self._timeout)
+        return self
+
+    async def __aexit__(self, *args) -> None:
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        if not self._client:
+            raise RuntimeError("client not initialized — use 'async with AsyncDeepSearchClient(...) as c'")
+        return self._client
+
+    # ── Catalog ────────────────────────────────────────────────────────
+
+    async def list_models(self) -> Result:
+        """List all models in the inference-gateway catalog."""
+        try:
+            r = await self.client.get(f"{self.base_url}/dss/api/providers")
+            r.raise_for_status()
+            data = r.json()
+            models = [
+                ModelInfo(
+                    id=m["id"],
+                    provider=m["provider"],
+                    owned_by=m.get("owned_by", ""),
+                    context_length=m.get("context_length"),
+                )
+                for m in data.get("models", [])
+            ]
+            return models, None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    async def list_search_providers(self) -> Result:
+        """List registered search providers (search-gateway's catalog)."""
+        try:
+            # Search-gateway isn't directly behind nginx — use its internal port
+            # via nginx routing if exposed, otherwise direct.
+            r = await self.client.get(f"{self.base_url}/dss/gateway/providers/registered")
+            r.raise_for_status()
+            return r.json(), None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    # ── Search ────────────────────────────────────────────────────────
+
+    async def search(
+        self,
+        query: str,
+        providers: Optional[List[str]] = None,
+        max_results: int = 10,
+        timeout: Optional[float] = None,
+    ) -> Result:
+        """Search via the search-gateway.
+
+        Args:
+            query: The search query.
+            providers: List of provider names (e.g. ['searxng', 'wikipedia']).
+                None = use gateway default.
+            max_results: Max hits to return.
+            timeout: Per-request timeout override.
+
+        Returns:
+            (SearchResult, None) on success, (None, error_str) on failure.
+        """
+        payload: Dict[str, Any] = {"query": query, "max_results": max_results}
+        if providers:
+            payload["providers"] = providers
+        if timeout:
+            payload["timeout"] = timeout
+        try:
+            r = await self.client.post(
+                f"{self.base_url}/dss/gateway/search",
+                json=payload,
+            )
+            r.raise_for_status()
+            data = r.json()
+            hits = [_hit_from_dict(h) for h in data]
+            return SearchResult(query=query, hits=hits), None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    # ── Aggregate (multi-provider search + dedup) ─────────────────────
+
+    async def aggregate(
+        self,
+        query: str,
+        providers: Optional[List[str]] = None,
+        max_results: int = 5,
+        timeout: float = 30.0,
+    ) -> Result:
+        """Aggregate search via the web-api /aggregate endpoint.
+
+        Same as search() but goes through web-api which adds dedup,
+        ranking, and per-domain type info. The TUI uses this for
+        E2E pipeline demos because it shows the full multi-provider
+        fan-out. Default timeout is 30s (was 15s) because the
+        aggregate fans out to N providers in parallel and slow
+        ones can hit the 12s search-gateway deadline.
+        """
+        payload: Dict[str, Any] = {
+            "query": query,
+            "max_results": max_results,
+            "timeout": timeout,
+        }
+        if providers:
+            payload["providers"] = providers
+        try:
+            r = await self.client.post(
+                f"{self.base_url}/dss/api/aggregate",
+                json=payload,
+                timeout=float(timeout) + 10.0,
+            )
+            r.raise_for_status()
+            data = r.json()
+            hits = [_hit_from_dict(s) for s in data.get("sources", [])]
+            return SearchResult(
+                query=query,
+                hits=hits,
+                provider_results=data.get("provider_results", {}),
+                elapsed_seconds=data.get("elapsed_seconds", 0.0),
+            ), None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    # ── Synthesize (LLM-stream with citation validation) ───────────────
+
+    async def synthesize_stream(
+        self,
+        query: str,
+        sources: List[Dict[str, Any]],
+        llm_model: Optional[str] = None,
+        llm_provider: Optional[str] = None,
+    ) -> AsyncIterator[SynthesizedChunk]:
+        """Stream a synthesis from search-agent.
+
+        Args:
+            query: The user's question.
+            sources: List of source dicts (must have title, url, description).
+            llm_model: Model name (e.g. 'virtual/free-coder'). Default = client.default_model.
+            llm_provider: Legacy field. If llm_model is set, this is ignored.
+
+        Yields:
+            SynthesizedChunk objects. The last chunk has finished=True.
+            If citations are hallucinated, the warning field on a near-end
+            chunk will contain the validation message.
+        """
+        payload = {
+            "query": query,
+            "sources": sources,
+            "llm_provider": llm_provider or "",
+            "llm_model": llm_model or self.default_model,
+        }
+        async with self.client.stream(
+            "POST",
+            f"{self.base_url}/dss/agent/synthesize/stream",
+            json=payload,
+        ) as r:
+            if r.status_code != 200:
+                # try to read the error body
+                body = await r.aread()
+                raise RuntimeError(f"synthesize failed ({r.status_code}): {body[:200]!r}")
+            async for line in r.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data_str = line[5:].strip()
+                if data_str == "[DONE]":
+                    return
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                content = data.get("content", "")
+                finished = data.get("finished", False)
+                # The search-agent's citation-validation warning arrives as
+                # a regular content chunk with the "Note: " prefix.
+                warning = None
+                if content and "Note:" in content and "_Note:" in content:
+                    warning = content
+                yield SynthesizedChunk(content=content, finished=finished, warning=warning)
+
+    # ── LLM direct ────────────────────────────────────────────────────
+
+    async def llm_complete(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+    ) -> Result:
+        """One-shot LLM completion via the inference-gateway.
+
+        Connects to the gateway DIRECTLY (not via nginx) since nginx
+        doesn't expose /dss/llm/. The gateway is at the same host as
+        base_url but on port 8005.
+        """
+        payload: Dict[str, Any] = {
+            "messages": messages,
+            "model": model or self.default_model,
+            "temperature": temperature,
+            "stream": False,
+        }
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+        try:
+            r = await self.client.post(
+                f"{self.llm_base_url}/v1/chat/completions",
+                json=payload,
+                timeout=120.0,
+            )
+            r.raise_for_status()
+            data = r.json()
+            # Gateway envelope: {content, usage, raw_response: {choices: [...]}}
+            content = data.get("content", "")
+            if not content:
+                # Try the OpenAI-standard choices path
+                raw = data.get("raw_response", {})
+                choices = raw.get("choices", [])
+                if choices:
+                    content = choices[0].get("message", {}).get("content", "")
+            return content, None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    async def llm_stream(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[Tuple[str, Optional[str]]]:
+        """Stream LLM tokens. Yields (chunk, error). Error is set on the last
+        item if the connection drops mid-stream."""
+        payload = {
+            "messages": messages,
+            "model": model or self.default_model,
+            "temperature": temperature,
+            "stream": True,
+        }
+        try:
+            async with self.client.stream(
+                "POST",
+                f"{self.llm_base_url}/v1/chat/completions",
+                json=payload,
+                timeout=120.0,
+            ) as r:
+                if r.status_code != 200:
+                    body = await r.aread()
+                    yield "", f"synthesize failed ({r.status_code}): {body[:200]!r}"
+                    return
+                async for line in r.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        return
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    # Gateway streams the raw OpenAI format for streaming
+                    # responses (no envelope): {choices: [{delta: {content,
+                    # reasoning_content}}]}. For non-streaming, it wraps
+                    # in {content, raw_response: ...}. Handle both.
+                    chunk = data.get("content", "")
+                    if not chunk:
+                        choices = data.get("choices", [])
+                        if not choices:
+                            raw = data.get("raw_response", {})
+                            choices = raw.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {})
+                            chunk = delta.get("content", "") or delta.get("reasoning_content", "")
+                    if chunk:
+                        yield chunk, None
+        except Exception as e:
+            yield "", f"{type(e).__name__}: {e}"
+
+    # ── Crawl ─────────────────────────────────────────────────────────
+
+    async def crawl(
+        self,
+        url: str,
+        formats: Optional[List[str]] = None,
+        extract_metadata: bool = True,
+        timeout: int = 30,
+        forward_to_warehouse: bool = False,
+    ) -> Result:
+        """Crawl a single URL via the crawler service.
+
+        The route is /dss/crawl/crawl — nginx strips /dss/crawl/ and
+        appends the rest, so /dss/crawl/crawl becomes /crawl on the
+        crawler service (the actual endpoint name).
+        """
+        payload = {
+            "url": url,
+            "formats": formats or ["markdown"],
+            "extract_metadata": extract_metadata,
+            "timeout": timeout,
+            "forward_to_warehouse": forward_to_warehouse,
+        }
+        try:
+            r = await self.client.post(
+                f"{self.base_url}/dss/crawl/crawl",
+                json=payload,
+                timeout=float(timeout) + 5.0,
+            )
+            r.raise_for_status()
+            data = r.json()
+            return CrawlResult(
+                url=data.get("url", url),
+                content=data.get("content", ""),
+                markdown=data.get("markdown"),
+                title=data.get("title") or data.get("extracted_data", {}).get("title"),
+                success=data.get("success", True),
+                error_message=data.get("error_message"),
+                word_count=data.get("word_count", 0),
+                extracted_at=data.get("extracted_at"),
+            ), None
+        except Exception as e:
+            return CrawlResult(url=url, content="", success=False, error_message=str(e)), f"{type(e).__name__}: {e}"
+
+    async def crawl_batch(
+        self,
+        urls: List[str],
+        concurrency: int = 5,
+        timeout: int = 30,
+    ) -> Result:
+        """Crawl multiple URLs in parallel. Returns a list of CrawlResults."""
+        sem = asyncio.Semaphore(concurrency)
+        async def _one(u: str) -> CrawlResult:
+            async with sem:
+                res, err = await self.crawl(u, timeout=timeout)
+                return res or CrawlResult(url=u, content="", success=False, error_message=err)
+        results = await asyncio.gather(*[_one(u) for u in urls])
+        return results, None
+
+    # ── Embed (vector store) ──────────────────────────────────────────
+
+    async def embed(
+        self,
+        documents: List[Dict[str, Any]],
+        namespace: str = "default",
+    ) -> Result:
+        """Embed documents into the vector store.
+
+        documents: list of {id?, text, metadata?}. The vector-store
+        returns {count, total_docs} on success (per-doc IDs are not
+        echoed back, but the namespaced IDs are queryable via /query).
+        """
+        payload = {"namespace": namespace, "documents": documents}
+        try:
+            r = await self.client.post(
+                f"{self.base_url}/dss/vectors/embed",
+                json=payload,
+            )
+            r.raise_for_status()
+            data = r.json()
+            count = data.get("count", 0) or len(documents)
+            return EmbedResult(ids=[], count=count), None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    async def vector_query(
+        self,
+        query: str,
+        namespace: str = "default",
+        top_k: int = 5,
+    ) -> Result:
+        """Query the vector store for nearest neighbors."""
+        payload = {"query": query, "namespace": namespace, "top_k": top_k}
+        try:
+            r = await self.client.post(
+                f"{self.base_url}/dss/vectors/query",
+                json=payload,
+            )
+            r.raise_for_status()
+            return r.json(), None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    # ── Warehouse ─────────────────────────────────────────────────────
+
+    async def warehouse_search(
+        self,
+        query: str,
+        domain: Optional[str] = None,
+        limit: int = 20,
+    ) -> Result:
+        """Full-text search across persisted content."""
+        params: Dict[str, Any] = {"q": query, "limit": limit}
+        if domain:
+            params["domain"] = domain
+        try:
+            r = await self.client.get(
+                f"{self.base_url}/dss/warehouse/search",
+                params=params,
+            )
+            r.raise_for_status()
+            data = r.json()
+            hits = [
+                WarehouseHit(
+                    id=h["id"],
+                    url=h["url"],
+                    title=h.get("title"),
+                    snippet=h.get("snippet"),
+                    source_domain=h.get("source_domain"),
+                    word_count=h.get("word_count", 0),
+                    ingested_at=h.get("ingested_at", ""),
+                )
+                for h in data
+            ]
+            return hits, None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    async def warehouse_stats(self) -> Result:
+        """Get warehouse statistics (total docs, etc.)."""
+        try:
+            r = await self.client.get(f"{self.base_url}/dss/warehouse/stats")
+            r.raise_for_status()
+            return r.json(), None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    # ── Health ────────────────────────────────────────────────────────
+
+    async def health(self) -> Result:
+        """Check the web-api's /health. Returns the JSON dict."""
+        try:
+            r = await self.client.get(f"{self.base_url}/health")
+            r.raise_for_status()
+            return r.json(), None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+
+# ─── Sync wrapper ──────────────────────────────────────────────────────
 
 
 class DeepSearchClient:
-    """
-    Comprehensive Python client for DeepSearchStack services
-    
+    """Synchronous wrapper around AsyncDeepSearchClient. For scripts.
+
     Usage:
-    ```python
-    from deepsearch_sdk import DeepSearchClient
-    
-    # Initialize client
-    client = DeepSearchClient(base_url="http://localhost:8080")
-    
-    # Crawl a URL
-    result = client.crawl("https://example.com", formats=["markdown"])
-    print(result.content)
-    
+        with DeepSearchClient() as client:
+            models, err = client.list_models()
+    """
+
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8083",
+        timeout: float = 30.0,
+        default_model: str = "virtual/free-coder",
+        llm_base_url: Optional[str] = None,
+    ):
+        self._async = AsyncDeepSearchClient(
+            base_url=base_url, timeout=timeout,
+            default_model=default_model, llm_base_url=llm_base_url,
+        )
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def __enter__(self) -> "DeepSearchClient":
+        self._loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(self._loop)
+        except RuntimeError:
+            pass
+        self._loop.run_until_complete(self._async.__aenter__())
+        return self
+
+    def __exit__(self, *args) -> None:
+        if self._loop and not self._loop.is_closed():
+            try:
+                self._loop.run_until_complete(self._async.__aexit__(*args))
+            finally:
+                self._loop.close()
+
+    def _run(self, coro):
+        if not self._loop or self._loop.is_closed():
+            with self as c:
+                return c._run(coro)
+        return self._loop.run_until_complete(coro)
+
+    # Catalog
+    def list_models(self) -> Result:
+        return self._run(self._async.list_models())
+
+    def list_search_providers(self) -> Result:
+        return self._run(self._async.list_search_providers())
+
     # Search
-    results = client.search("What is AI?", max_results=5)
-    print(results.results)
-    ```
+    def search(self, query: str, **kwargs) -> Result:
+        return self._run(self._async.search(query, **kwargs))
+
+    def aggregate(self, query: str, **kwargs) -> Result:
+        return self._run(self._async.aggregate(query, **kwargs))
+
+    # Synthesize (async generator → list)
+    def synthesize(self, query: str, sources: List[Dict[str, Any]], **kwargs) -> Tuple[str, Optional[str]]:
+        """Drain the synthesize stream and return (full_text, error)."""
+        async def _drain():
+            chunks = []
+            err = None
+            async for ch in self._async.synthesize_stream(query, sources, **kwargs):
+                if ch.content and not ch.finished:
+                    chunks.append(ch.content)
+                if ch.warning:
+                    chunks.append("\n\n" + ch.warning)
+            return "".join(chunks), err
+        return self._run(_drain())
+
+    # LLM
+    def llm_complete(self, messages, **kwargs) -> Result:
+        return self._run(self._async.llm_complete(messages, **kwargs))
+
+    def llm_stream(self, messages, **kwargs) -> Iterator[Tuple[str, Optional[str]]]:
+        """Drain the async stream into a sync iterator."""
+        async def _drain():
+            out = []
+            async for chunk, err in self._async.llm_stream(messages, **kwargs):
+                if err:
+                    return out, err
+                if chunk:
+                    out.append(chunk)
+            return out, None
+        chunks, err = self._run(_drain())
+        if err:
+            yield "", err
+            return
+        for c in chunks:
+            yield c, None
+
+    # Crawl
+    def crawl(self, url: str, **kwargs) -> Result:
+        return self._run(self._async.crawl(url, **kwargs))
+
+    def crawl_batch(self, urls: List[str], **kwargs) -> Result:
+        return self._run(self._async.crawl_batch(urls, **kwargs))
+
+    # Embed
+    def embed(self, documents, **kwargs) -> Result:
+        return self._run(self._async.embed(documents, **kwargs))
+
+    def vector_query(self, query, **kwargs) -> Result:
+        return self._run(self._async.vector_query(query, **kwargs))
+
+    # Warehouse
+    def warehouse_search(self, query, **kwargs) -> Result:
+        return self._run(self._async.warehouse_search(query, **kwargs))
+
+    def warehouse_stats(self) -> Result:
+        return self._run(self._async.warehouse_stats())
+
+    # Health
+    def health(self) -> Result:
+        return self._run(self._async.health())
+
+
+# ─── Citation validation (used by the TUI) ────────────────────────────
+
+import re as _re
+_CITATION_RE = _re.compile(r"\[(\d+)\]")
+
+
+def validate_citations(content: str, num_sources: int) -> Dict[str, Any]:
+    """Parse [N] citations and detect out-of-range ones.
+
+    Returns:
+      {
+        "total": int,
+        "valid": List[int],
+        "invalid": List[int],   # deduped, in first-seen order
+        "invalid_strs": List[str],
+      }
     """
-    
-    def __init__(self, base_url: str = "http://localhost:8080", timeout: int = 30):
-        self.base_url = base_url.rstrip("/")
-        self.timeout = aiohttp.ClientTimeout(total=timeout)
-        self.session = None
-        
-    async def __aenter__(self):
-        """Async context manager entry"""
-        self.session = aiohttp.ClientSession(timeout=self.timeout)
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit"""
-        if self.session:
-            await self.session.close()
-    
-    def _get_service_url(self, service: str, endpoint: str) -> str:
-        """Map service names to their respective ports"""
-        service_ports = {
-            "crawler": "8004",
-            "search": "8003",
-            "llm": "8081",
-            "deepsearch": "8001"
-        }
-        port = service_ports.get(service)
-        # Return the correct service URL based on port
-        base = self.base_url.rsplit(':', 1)[0] if ':' in self.base_url else self.base_url
-        return f"http://localhost:{port}{endpoint}"
-    
-    async def crawl(self, url: str, formats: List[str] = ["markdown"],
-                   extract_metadata: bool = True, timeout: int = 10) -> CrawlResult:
-        """
-        Crawl a URL and convert to specified format
-
-        Args:
-            url: URL to crawl
-            formats: List of output formats (e.g., ["markdown", "structured_text"])
-            extract_metadata: Whether to extract metadata
-            timeout: Request timeout in seconds
-
-        Returns:
-            CrawlResult with content and metadata
-        """
-        if not self.session:
-            raise RuntimeError("SDK not initialized. Use 'async with DeepSearchClient() as client:' or call connect()")
-
-        try:
-            # For crawler service, use port 8004
-            crawler_url = self._get_service_url("crawler", "/crawl")
-
-            payload = {
-                "url": url,
-                "formats": formats,
-                "extract_metadata": extract_metadata,
-                "timeout": timeout
-            }
-
-            async with self.session.post(crawler_url, json=payload) as response:
-                response.raise_for_status()
-                data = await response.json()
-
-                return CrawlResult(
-                    url=data.get("url", url),
-                    content=data.get("content", ""),
-                    extracted_data=data.get("extracted_data"),
-                    success=data.get("success", True),
-                    error_message=data.get("error_message")
-                )
-        except Exception as e:
-            return CrawlResult(
-                url=url,
-                content="",
-                extracted_data=None,
-                success=False,
-                error_message=str(e)
-            )
-    
-    async def search(self, query: str, max_results: int = 10,
-                    search_depth: str = "basic", include_domains: List[str] = None,
-                    exclude_domains: List[str] = None) -> SearchResult:
-        """
-        Perform a search using the search gateway
-
-        Args:
-            query: Search query string
-            max_results: Maximum number of results to return
-            search_depth: Search depth level ("basic", "advanced", "deep")
-            include_domains: Domains to specifically include
-            exclude_domains: Domains to exclude
-
-        Returns:
-            SearchResult with query results
-        """
-        if not self.session:
-            raise RuntimeError("SDK not initialized. Use 'async with DeepSearchClient() as client:' or call connect()")
-
-        try:
-            # For search gateway, use port 8003
-            search_url = self._get_service_url("search", "/search")
-
-            payload = {
-                "query": query,
-                "max_results": max_results,
-                "search_depth": search_depth,
-                "include_domains": include_domains or [],
-                "exclude_domains": exclude_domains or []
-            }
-
-            async with self.session.post(search_url, json=payload) as response:
-                response.raise_for_status()
-                data = await response.json()
-
-                # The API returns a list of search results directly
-                results_list = data if isinstance(data, list) else data.get("results", [])
-                sources = list(set([result.get("source", "") for result in results_list if result.get("source")]))
-
-                return SearchResult(
-                    query=query,
-                    results=results_list,
-                    sources=sources,
-                    timestamp=""
-                )
-        except Exception as e:
-            raise RuntimeError(f"Search failed: {str(e)}")
-            
-    async def llm_complete(self, messages: List[Dict[str, str]],
-                         provider: str = "deepseek-chat", temperature: float = 0.7,
-                         max_tokens: int = 500) -> str:
-        """
-        Get completion from the LLM gateway
-
-        Args:
-            messages: List of messages in OpenAI format
-            provider: Provider to use ("deepseek-chat", "opencode/deepseek-v4-flash-free", etc.)
-            temperature: Temperature for generation
-            max_tokens: Maximum tokens to generate
-
-        Returns:
-            Generated text response
-        """
-        if not self.session:
-            raise RuntimeError("SDK not initialized. Use 'async with DeepSearchClient() as client:' or call connect()")
-
-        try:
-            # For LLM gateway, use port 8081
-            llm_url = self._get_service_url("llm", "/v1/chat/completions")
-
-            payload = {
-                "model": provider,  # Standard OpenAI format
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens
-            }
-
-            async with self.session.post(llm_url, json=payload) as response:
-                response.raise_for_status()
-                data = await response.json()
-
-                # Return the content from the response
-                choices = data.get("choices", [])
-                if choices:
-                    return choices[0].get("message", {}).get("content", "")
-                else:
-                    return data.get("content", "")
-        except Exception as e:
-            raise RuntimeError(f"LLM completion failed: {str(e)}")
+    found = _CITATION_RE.findall(content)
+    total = len(found)
+    valid: List[int] = []
+    invalid: List[int] = []
+    invalid_strs: List[str] = []
+    seen: set = set()
+    for s in found:
+        n = int(s)
+        if 1 <= n <= num_sources:
+            valid.append(n)
+        else:
+            if n not in seen:
+                seen.add(n)
+                invalid.append(n)
+                invalid_strs.append(f"[{n}]")
+    return {"total": total, "valid": valid, "invalid": invalid, "invalid_strs": invalid_strs}
 
 
-# Synchronous wrapper for simpler usage
-class SyncDeepSearchClient:
-    """
-    Synchronous wrapper around the async DeepSearchClient for simpler usage
-    """
-
-    def __init__(self, base_url: str = "http://localhost:8080", timeout: int = 30):
-        self.client = DeepSearchClient(base_url, timeout)
-        self.loop = None
-
-    def __enter__(self):
-        # Create asyncio event loop for sync wrapper
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self.client.__aenter__())
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if hasattr(self.client, 'session') and self.client.session:
-            self.loop.run_until_complete(self.client.session.close())
-        if self.loop and not self.loop.is_closed():
-            self.loop.close()
-
-    def crawl(self, url: str, formats: List[str] = ["markdown"],
-              extract_metadata: bool = True, timeout: int = 10) -> CrawlResult:
-        """Synchronous wrapper for crawl method"""
-        if self.loop is None:
-            # Handle case where used outside context manager
-            with self as sync_client:
-                return sync_client.crawl(url, formats, extract_metadata, timeout)
-        return self.loop.run_until_complete(
-            self.client.crawl(url, formats, extract_metadata, timeout)
-        )
-
-    def search(self, query: str, max_results: int = 10,
-               search_depth: str = "basic", include_domains: List[str] = None,
-               exclude_domains: List[str] = None) -> SearchResult:
-        """Synchronous wrapper for search method"""
-        if self.loop is None:
-            with self as sync_client:
-                return sync_client.search(query, max_results, search_depth,
-                                        include_domains, exclude_domains)
-        return self.loop.run_until_complete(
-            self.client.search(query, max_results, search_depth,
-                              include_domains, exclude_domains)
-        )
-
-    def llm_complete(self, messages: List[Dict[str, str]],
-                     provider: str = "deepseek-chat", temperature: float = 0.7,
-                     max_tokens: int = 500) -> str:
-        """Synchronous wrapper for llm_complete method"""
-        if self.loop is None:
-            with self as sync_client:
-                return sync_client.llm_complete(messages, provider, temperature, max_tokens)
-        return self.loop.run_until_complete(
-            self.client.llm_complete(messages, provider, temperature, max_tokens)
-        )
+# ─── Helpers ────────────────────────────────────────────────────────────
 
 
-# Convenience functions for simple usage
-def crawl_sync(url: str, formats: List[str] = ["markdown"],
-              extract_metadata: bool = True, timeout: int = 10,
-              base_url: str = "http://localhost:8080") -> CrawlResult:
-    """Convenience function to crawl a URL synchronously"""
-    with SyncDeepSearchClient(base_url=base_url) as client:
-        return client.crawl(url, formats=formats,
-                           extract_metadata=extract_metadata, timeout=timeout)
-
-
-def search_sync(query: str, max_results: int = 10,
-               search_depth: str = "basic", include_domains: List[str] = None,
-               exclude_domains: List[str] = None,
-               base_url: str = "http://localhost:8080") -> SearchResult:
-    """Convenience function to search synchronously"""
-    with SyncDeepSearchClient(base_url=base_url) as client:
-        return client.search(query, max_results=max_results,
-                            search_depth=search_depth,
-                            include_domains=include_domains,
-                            exclude_domains=exclude_domains)
-
-
-def llm_complete_sync(messages: List[Dict[str, str]],
-                     provider: str = "deepseek-chat", temperature: float = 0.7,
-                     max_tokens: int = 500,
-                     base_url: str = "http://localhost:8080") -> str:
-    """Convenience function to get LLM completion synchronously"""
-    with SyncDeepSearchClient(base_url=base_url) as client:
-        return client.llm_complete(messages, provider=provider,
-                                 temperature=temperature, max_tokens=max_tokens)
+def _hit_from_dict(d: Dict[str, Any]) -> SearchHit:
+    """Convert a search-hit dict (from any of the gateway endpoints) to a SearchHit."""
+    return SearchHit(
+        title=d.get("title", ""),
+        url=d.get("url", ""),
+        description=d.get("description", "") or d.get("snippet", "") or "",
+        source=d.get("source", ""),
+        confidence=d.get("confidence", 1.0),
+        snippet=d.get("snippet"),
+        domain_authority=d.get("domain_authority"),
+        rank=d.get("rank"),
+        published_date=d.get("published_date"),
+    )
 
 
 __all__ = [
+    "AsyncDeepSearchClient",
     "DeepSearchClient",
-    "SyncDeepSearchClient",
     "CrawlResult",
+    "SearchHit",
     "SearchResult",
-    "crawl_sync",
-    "search_sync",
-    "llm_complete_sync"
+    "SynthesizedChunk",
+    "ModelInfo",
+    "EmbedResult",
+    "WarehouseHit",
+    "validate_citations",
 ]
