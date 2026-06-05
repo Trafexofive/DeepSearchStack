@@ -24,7 +24,6 @@ LLM_GATEWAY_URL="${BASE_URL}/llm"
 SEARCH_AGENT_URL="${BASE_URL}/agent"
 WEB_API_URL="${BASE_URL}/"
 SEARXNG_URL="${BASE_URL}/searxng/"
-WHOOGLE_URL="${BASE_URL}/whoogle/"
 YACY_URL="${BASE_URL}/yacy/"
 
 # Model to use for testing. Must match OLLAMA_DEFAULT_MODEL in your .env
@@ -77,7 +76,7 @@ check_service_health "Web API" "${WEB_API_URL}" 200
 check_service_health "LLM Gateway" "${LLM_GATEWAY_URL}/health" 200
 check_service_health "Search Agent" "${SEARCH_AGENT_URL}/health" 200
 check_service_health "SearXNG" "${SEARXNG_URL}" 200
-check_service_health "Whoogle" "${WHOOGLE_URL}" 200
+# Whoogle removed 2026-06-05 (upstream EOL 2026-04-14)
 # YaCy root often returns 401/403 by default, which is an "up" state
 check_service_health "YaCy" "${YACY_URL}" 401
 
@@ -145,8 +144,7 @@ echo -e "\n${YELLOW}--- STEP 4: Verifying Search Backend Proxy Routes ---${NC}"
 run_test "SearXNG UI is accessible through the reverse proxy" \
     "curl -s -f -L --max-time ${HEALTH_CHECK_TIMEOUT} '${SEARXNG_URL}' | grep -q 'SearXNG'"
 
-run_test "Whoogle UI is accessible through the reverse proxy" \
-    "curl -s -f -L --max-time ${HEALTH_CHECK_TIMEOUT} '${WHOOGLE_URL}' | grep -q 'Whoogle Search'"
+# Whoogle UI test removed 2026-06-05 (upstream EOL)
 
 
 # --- TEST SUITE END ---

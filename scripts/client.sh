@@ -40,7 +40,7 @@ usage() {
     echo "    Options:"
     echo "      --stream              Enable streaming response for the answer."
     echo "      --llm-provider <name>   Specify an LLM provider to synthesize the answer (e.g., ollama, groq)."
-    echo "      -p, --providers <list>  Comma-separated list of search providers (e.g., whoogle,searxng)."
+    echo "      -p, --providers <list>  Comma-separated list of search providers (e.g., searxng,wikipedia)."
     echo "      -n, --max-results <num> Limit the number of sources used for the answer (default: 10)."
     echo "      --sort <method>       Sort results by 'relevance', 'date', or 'source_quality'."
     echo ""
@@ -60,7 +60,7 @@ usage() {
     echo ""
     echo -e "${YELLOW}Examples:${NC}"
     echo "  $0 search \"What is the latest news on the James Webb Telescope?\" --stream"
-    echo "  $0 search \"Benefits of Rust vs Go\" --llm-provider groq -p whoogle,brave -n 5"
+    echo "  $0 search \"Benefits of Rust vs Go\" --llm-provider groq -p searxng,wikipedia -n 5"
     echo "  $0 ask \"Write a python function to find prime numbers\" --provider ollama --stream"
 }
 

@@ -64,7 +64,7 @@ run_command search "What is the doppler effect?" --llm-provider ollama
 run_command search "What is the doppler effect?" --llm-provider groq
 run_command search "Explain black holes to a five-year-old." --llm-provider ollama --stream
 run_command search "Explain black holes to a five-year-old." --llm-provider groq --stream
-run_command search "Latest news on Mars rovers" --providers whoogle
+run_command search "Latest news on Mars rovers" --providers searxng,wikipedia
 run_command search "Top 3 recipes for vegetarian chili" --max-results 3
 
 # --- Final Summary ---

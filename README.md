@@ -13,7 +13,7 @@ User Query
   ▼
 search-gateway (13 providers across 8 domains)
   │
-  ├─► whoogle, searxng, yacy, duckduckgo (web)
+  ├─► searxng, yacy, duckduckgo (web)
   ├─► wikipedia (encyclopedia)
   ├─► stackexchange (Q&A)
   ├─► arxiv, pubmed, crossref (academic)
@@ -310,9 +310,9 @@ DeepSearchStack/                      # 159 files, 11,408 LoC Python
 ### Stacks
 | Stack | Compose file | Services |
 |-------|-------------|----------|
-| `dss-full` | `infra/dss-full.compose.yml` | Full — nginx, postgres, redis, searxng, whoogle, yacy, search-gateway, deepsearch, vector-store, crawler, knowledge-warehouse, search-agent, web-api |
-| `dss-light` | `infra/dss-light.compose.yml` | Minimal — nginx, postgres, redis, deepsearch, vector-store, crawler |
-| `dss-test` | `infra/dss-test.compose.yml` | Testing — nginx, postgres, redis, searxng, whoogle, yacy, search-gateway, deepsearch, vector-store, crawler |
+| `dss-full` | `infra/docker-compose.yml` | Full — nginx, postgres, redis, searxng, yacy, search-gateway, vector-store, crawler, knowledge-warehouse, search-agent, web-api, inference-gateway |
+| `dss-light` | `infra/docker-compose.light.yml` | Minimal — nginx, postgres, redis, vector-store, crawler |
+| `dss-test` | `infra/docker-compose.test.yml` | Testing — nginx, postgres, redis, searxng, yacy, search-gateway, vector-store, crawler |
 | `full` | `docker-compose.yml` | Root compose |
 
 ### Commands

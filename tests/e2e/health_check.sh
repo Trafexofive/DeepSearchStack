@@ -86,7 +86,7 @@ check_service_health "crawler" "8003" "http://localhost:8003/health"
 echo ""
 echo -e "${YELLOW}Search Backends:${NC}"
 check_service_health "yacy" "8090" "http://localhost:8090/api/status.json"
-check_service_health "whoogle" "5000" ""  # No specific health check
+# whoogle removed 2026-06-05 (upstream EOL 2026-04-14)
 check_service_health "searxng" "8080" ""  # No specific health check
 
 echo ""

@@ -21,7 +21,6 @@ LLM_GATEWAY_URL="${BASE_URL}/llm"
 SEARCH_AGENT_URL="${BASE_URL}/agent"
 WEB_API_URL="${BASE_URL}/"
 SEARXNG_URL="${BASE_URL}/searxng/"
-WHOOGLE_URL="${BASE_URL}/whoogle/"
 YACY_URL="${BASE_URL}/yacy/"
 
 OLLAMA_MODEL_TO_TEST=${OLLAMA_DEFAULT_MODEL:-llama3}
@@ -81,7 +80,6 @@ check_service_health "Web API / Frontend" "${WEB_API_URL}" 200
 check_service_health "LLM Gateway" "${LLM_GATEWAY_URL}/health" 200
 check_service_health "Search Agent" "${SEARCH_AGENT_URL}/health" 200
 check_service_health "SearXNG" "${SEARXNG_URL}" 200
-check_service_health "Whoogle" "${WHOOGLE_URL}" 200
 check_service_health "YaCy API" "${YACY_URL}/api/status.json" 200 35 6 # Extra patient check for YaCy
 
 # --- 2. LLM Gateway API Tests ---

@@ -104,7 +104,7 @@ async def cmd_ask(args):
 async def cmd_search(args):
     console.print(f"Searching for: \"{args.query}\"...")
     # FIX: Ensure 'providers' is always a list, never null.
-    providers_list = args.providers.split(',') if args.providers else ["whoogle", "searxng"]
+    providers_list = args.providers.split(',') if args.providers else ["searxng", "wikipedia", "github"]
     payload = {
         "query": args.query,
         "providers": providers_list,

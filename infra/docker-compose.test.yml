@@ -76,7 +76,6 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - YACY_URL=http://yacy:8090
-      - WHOOGLE_URL=http://whoogle:5000
       - SEARXNG_URL=http://searxng:8080
 
   deepsearch:
@@ -112,14 +111,6 @@ services:
       timeout: 10s
       retries: 20
       start_period: 120s
-
-  whoogle:
-    image: benbusby/whoogle-search:latest
-    container_name: dss-test-whoogle
-    restart: unless-stopped
-    networks: [deepsearch_net]
-    environment:
-      - WHOOGLE_CONFIG_GET_ONLY=1
 
   searxng:
     image: searxng/searxng:latest

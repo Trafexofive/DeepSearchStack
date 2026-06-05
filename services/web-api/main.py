@@ -224,7 +224,6 @@ DOMAIN_MAP = {
     "pubmed": "academic",
     "crossref": "academic",
     "github": "code",
-    "whoogle": "web",
     "searxng": "web",
     "yacy": "web",
     "duckduckgo": "web",
@@ -330,9 +329,10 @@ async def shutdown():
 # ─── Helpers ───────────────────────────────────────────────
 
 # Provider list - default 7 verified-working, non-redundant providers across 7 domains.
-# Redundant providers removed from default: whoogle/duckduckgo (SearXNG covers Google+Bing+DDG),
+# Redundant providers removed from default: duckduckgo (SearXNG covers Google+Bing+DDG),
 #   pubmed/crossref/internetarchive (lower priority, keep domain count lean).
 # IP-blocked from Docker: reddit (needs proxy).
+# Whoogle: removed (Google blocks Tor-exit IPs, never returned results).
 #
 # Override via env var AGGREGATE_PROVIDERS (comma-separated), e.g.:
 #   AGGREGATE_PROVIDERS=searxng,wikipedia,github,arxiv
