@@ -29,6 +29,12 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     networks:
       - deepsearch_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     depends_on:
       - web-api
       - crawler
@@ -36,11 +42,6 @@ services:
       - vector-store
       - search-agent
       - search-gateway
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:80/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   # --- CORE INFRASTRUCTURE ---
   postgres:
@@ -90,7 +91,6 @@ services:
         condition: service_healthy
     environment:
       - YACY_URL=http://yacy:8090
-      - WHOOGLE_URL=http://whoogle:5000
       - SEARXNG_URL=http://searxng:8080
       - REDIS_URL=redis://redis:6379/0
 
@@ -109,15 +109,6 @@ services:
       timeout: 15s
       retries: 30
       start_period: 180s
-
-  whoogle:
-    image: benbusby/whoogle-search:latest
-    container_name: dss-whoogle
-    restart: unless-stopped
-    networks:
-      - deepsearch_net
-    environment:
-      - WHOOGLE_CONFIG_GET_ONLY=1
 
   searxng:
     image: searxng/searxng:latest

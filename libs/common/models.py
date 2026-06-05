@@ -10,7 +10,6 @@ from datetime import datetime
 
 # ==================== ENUMS ====================
 class SearchProvider(str, Enum):
-    WHOOGLE = "whoogle"
     SEARXNG = "searxng"
     YACY = "yacy"
     WIKIPEDIA = "wikipedia"
@@ -47,7 +46,6 @@ class SearchResult(BaseModel):
 class SearchGatewayRequest(BaseModel):
     query: str
     providers: List[SearchProvider] = [
-        SearchProvider.WHOOGLE,
         SearchProvider.SEARXNG,
         SearchProvider.DUCKDUCKGO,
         SearchProvider.WIKIPEDIA

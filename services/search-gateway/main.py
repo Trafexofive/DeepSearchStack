@@ -21,19 +21,44 @@ from .utils.system_components import MetricsCollector, CircuitBreaker
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("search_gateway")
 
+# Per-provider timeout (audit N5): if a single provider is slow, the
+# whole gather() waits for it. Wrapping each in asyncio.wait_for cuts
+# off the slow ones so fast providers don't get held up.
+PROVIDER_TIMEOUT_DEFAULT = float(os.environ.get("PROVIDER_TIMEOUT", "4.0"))
+
+
 class SearchGateway:
     def __init__(self, redis_client: redis.Redis):
         self.provider_manager = SearchProviderManager(MetricsCollector(), CircuitBreaker(redis_client))
         self.ranker = ResultRanker()
         self.version = "1.0.0"
 
+    async def _query_with_timeout(self, client, provider, query, request, timeout):
+        """Wrap a single provider call in a timeout. Returns None on timeout/error."""
+        try:
+            return await asyncio.wait_for(
+                self.provider_manager.query_provider(client, provider, query, request),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Provider {provider.value} timed out after {timeout}s")
+            return None
+        except Exception as e:
+            logger.warning(f"Provider {provider.value} error: {type(e).__name__}: {e}")
+            return None
+
     async def search(self, request: SearchGatewayRequest) -> List[SearchResult]:
         start_time = time.time()
-        
+        # Per-provider timeout capped at the request-level timeout.
+        per_provider_timeout = min(PROVIDER_TIMEOUT_DEFAULT, request.timeout)
+
         async with httpx.AsyncClient(timeout=request.timeout) as client:
-            tasks = [self.provider_manager.query_provider(client, p, request.query, request) for p in request.providers]
+            tasks = [
+                self._query_with_timeout(client, p, request.query, request, per_provider_timeout)
+                for p in request.providers
+            ]
             results = await asyncio.gather(*tasks)
-        
+
         all_results = [res for pres in results if pres for res in pres]
         logger.info(f"Got {len(all_results)} total results from {len(request.providers)} providers.")
 
@@ -42,8 +67,8 @@ class SearchGateway:
         limited_results = ranked_results[:request.max_results]
 
         execution_time = time.time() - start_time
-        logger.info(f"Search completed in {execution_time:.2f} seconds.")
-        
+        logger.info(f"Search completed in {execution_time:.2f}s (per-provider timeout: {per_provider_timeout}s).")
+
         return limited_results
 
     def _fuse_and_deduplicate(self, all_results: List[SearchResult]) -> List[SearchResult]:
@@ -66,6 +91,17 @@ async def search_endpoint(request: SearchGatewayRequest, gateway: SearchGateway 
 async def health(gateway: SearchGateway = Depends(lambda: app.state.gateway)):
     return {"status": "healthy", "version": gateway.version}
 
-@app.get("/providers")
-async def list_providers(gateway: SearchGateway = Depends(lambda: app.state.gateway)):
+@app.get("/providers/registered")
+async def list_registered_providers(gateway: SearchGateway = Depends(lambda: app.state.gateway)):
+    """List all registered providers (static config, not runtime health).
+
+    The 'enabled' status is a static string indicating the provider is
+    configured, not that it is currently healthy. For per-provider runtime
+    health, check the upstream service's /health endpoint.
+    """
+    return gateway.provider_manager.get_provider_status()
+
+# Backwards-compatible alias. Deprecated; use /providers/registered.
+@app.get("/providers", deprecated=True)
+async def list_providers_legacy(gateway: SearchGateway = Depends(lambda: app.state.gateway)):
     return gateway.provider_manager.get_provider_status()

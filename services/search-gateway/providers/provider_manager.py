@@ -2,7 +2,7 @@
 Search Provider Manager — 13 providers across 8 domains.
 
 Direct API providers (all free, no API keys required):
-  web: whoogle, searxng, yacy, duckduckgo
+  web: searxng, yacy, duckduckgo
   encyclopedia: wikipedia
   q_and_a: stackexchange
   academic: arxiv, pubmed, crossref
@@ -45,10 +45,6 @@ class SearchProviderManager:
         self.circuit_breaker = circuit_breaker
         self.providers = {
             # ── Web Search ──────────────────────────────────────────────
-            SearchProvider.WHOOGLE: {
-                "url": os.environ.get("WHOOGLE_URL", "http://whoogle:5000"),
-                "weight": 1.0, "parser": self._parse_whoogle,
-            },
             SearchProvider.SEARXNG: {
                 "url": os.environ.get("SEARXNG_URL", "http://searxng:8080"),
                 "weight": 1.0, "parser": self._parse_searxng,
@@ -123,10 +119,7 @@ class SearchProviderManager:
             url = cfg["url"]
 
             # ── URL + param construction per provider ──────────────────
-            if provider == SearchProvider.WHOOGLE:
-                url = f"{url}/search"
-                params = {"q": query, "format": "json"}
-            elif provider == SearchProvider.SEARXNG:
+            if provider == SearchProvider.SEARXNG:
                 url = f"{url}/search"
                 params = {"q": query, "format": "json", "language": "en"}
             elif provider == SearchProvider.YACY:
@@ -193,13 +186,6 @@ class SearchProviderManager:
             return None
 
     # ── Parsers ────────────────────────────────────────────────────────────
-
-    def _parse_whoogle(self, data, w):
-        if not isinstance(data, dict) or "results" not in data:
-            return []
-        return [SearchResult(title=r.get("title", ""), url=r.get("url", ""),
-                             description=r.get("snippet", ""), source="whoogle", confidence=w)
-                for r in data.get("results", []) if r.get("url")]
 
     def _parse_searxng(self, data, w):
         return [SearchResult(title=r.get("title", ""), url=r.get("url", ""),
