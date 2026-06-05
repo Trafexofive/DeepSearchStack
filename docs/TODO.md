@@ -93,6 +93,31 @@
 
 ---
 
+### **EPIC 5.5: UX - Clean E2E TUI (using the SDK logically)**
+- **Priority:** Medium
+- **Est. Time:** 2 Days
+- **Description:** Build a terminal UI client that exercises the full DeepSearchStack pipeline end-to-end through the Python SDK (`sdk/python/deepsearch.py`). The TUI should be a developer-facing tool for smoke-testing the stack and demoing the search → scrape → embed → retrieve → synthesize flow without a browser. It must logically call the SDK, not raw HTTP, so it stays a real consumer of the public API surface.
+
+- **Tasks:**
+    - **`[ ]` 5.5.1: Pick TUI framework**
+        - `[ ]` 5.5.1.1: Evaluate options: `textual` (rich, async-native), `prompt_toolkit` (lighter), `rich` (panels + live display). Default: `textual`.
+        - `[ ]` 5.5.1.2: Add chosen TUI lib to `sdk/python/requirements.txt`.
+    - **`[ ]` 5.5.2: Wire to SDK, not raw HTTP**
+        - `[ ]` 5.5.2.1: Import `DeepSearchClient` from `sdk.python.deepsearch`. No `httpx` calls in the TUI module.
+        - `[ ]` 5.5.2.2: Expose SDK methods the TUI needs: `search`, `crawl`, `llm_complete`, plus a new `aggregate` wrapper if not present.
+        - `[ ]` 5.5.2.3: Stream SDK results into the TUI (SSE for `/api/search/stream`).
+    - **`[ ]` 5.5.3: E2E pipeline view**
+        - `[ ]` 5.5.3.1: Side panel: list of search providers queried + their status (hit / miss / error).
+        - `[ ]` 5.5.3.2: Main panel: streaming synthesis with bracket citations highlighted.
+        - `[ ]` 5.5.3.3: Bottom panel: source URLs (clickable / copyable).
+    - **`[ ]` 5.5.4: Containerize**
+        - `[ ]` 5.5.4.1: Dockerfile at `sdk/python/tui/Dockerfile` (python:3.12-slim + textual + the SDK installed in editable mode).
+        - `[ ]` 5.5.4.2: Add to `infra/docker-compose.yml` as `tui` service (no port, `tty: true`, `stdin_open: true` for `docker attach`).
+        - `[ ]` 5.5.4.3: `make tui` target that runs `docker compose run --rm tui` and connects to the running stack.
+    - **`[ ]` 5.5.5: Smoke test against the stack**
+        - `[ ]` 5.5.5.1: Run the TUI against a live `make up` stack; verify all 5 stages appear in the UI.
+        - `[ ]` 5.5.5.2: Document in `sdk/python/README.md` under a new "TUI" section.
+
 ### **EPIC 5: UI/UX - Integrate Chimera Frontend**
 - **Priority:** Low
 - **Est. Time:** 2 Days
