@@ -39,7 +39,7 @@ async def generate_case_study(client: httpx.AsyncClient, subject: str, challenge
     )
 
     payload = {
-        "provider": "gemini",
+        "provider": "deepseek-chat",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}

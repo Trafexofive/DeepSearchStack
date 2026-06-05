@@ -176,14 +176,14 @@ class DeepSearchClient:
             raise RuntimeError(f"Search failed: {str(e)}")
             
     async def llm_complete(self, messages: List[Dict[str, str]],
-                         provider: str = "gemini", temperature: float = 0.7,
+                         provider: str = "deepseek-chat", temperature: float = 0.7,
                          max_tokens: int = 500) -> str:
         """
         Get completion from the LLM gateway
 
         Args:
             messages: List of messages in OpenAI format
-            provider: Provider to use ("gemini", "groq", etc.)
+            provider: Provider to use ("deepseek-chat", "opencode/deepseek-v4-flash-free", etc.)
             temperature: Temperature for generation
             max_tokens: Maximum tokens to generate
 
@@ -266,7 +266,7 @@ class SyncDeepSearchClient:
         )
 
     def llm_complete(self, messages: List[Dict[str, str]],
-                     provider: str = "gemini", temperature: float = 0.7,
+                     provider: str = "deepseek-chat", temperature: float = 0.7,
                      max_tokens: int = 500) -> str:
         """Synchronous wrapper for llm_complete method"""
         if self.loop is None:
@@ -300,7 +300,7 @@ def search_sync(query: str, max_results: int = 10,
 
 
 def llm_complete_sync(messages: List[Dict[str, str]],
-                     provider: str = "gemini", temperature: float = 0.7,
+                     provider: str = "deepseek-chat", temperature: float = 0.7,
                      max_tokens: int = 500,
                      base_url: str = "http://localhost:8080") -> str:
     """Convenience function to get LLM completion synchronously"""

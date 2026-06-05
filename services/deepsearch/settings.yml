@@ -124,8 +124,8 @@ synthesis:
   
   # Fallback providers if default fails
   fallback_providers:
-    - "groq"
-    - "gemini"
+    - "deepseek-chat"
+    - "opencode/deepseek-v4-flash-free"
   
   # Maximum tokens in LLM response
   max_tokens: 4096

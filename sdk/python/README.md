@@ -86,7 +86,7 @@ Parameters:
 
 Returns: `SearchResult` object
 
-#### llm_complete(messages, provider="gemini", temperature=0.7, max_tokens=500)
+#### llm_complete(messages, provider="deepseek-chat", temperature=0.7, max_tokens=500)
 Gets completion from the LLM gateway.
 
 Parameters:

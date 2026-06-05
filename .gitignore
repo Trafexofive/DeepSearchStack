@@ -117,3 +117,6 @@ build/
 *.o
 *.so
 *.a
+
+# SearXNG container-generated config (not source)
+services/searxng/full-aggregation.yml

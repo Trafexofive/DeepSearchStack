@@ -48,7 +48,7 @@ async def generate_final_report(client: httpx.AsyncClient, topic: str, search_re
     user_prompt = f"**Topic:** {topic}\n\n**Research Context:**\n{context}"
     
     payload = {
-        "provider": "gemini", # Use a powerful model for better synthesis
+        "provider": "deepseek-chat", # Use a powerful model for better synthesis
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}

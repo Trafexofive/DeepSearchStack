@@ -49,7 +49,7 @@ async def generate_follow_up_question(client: httpx.AsyncClient, context: str) -
     system_prompt = "You are a researcher. Based on the following text, what is the single most insightful follow-up question to ask to get more detail or a deeper explanation? Return only the question, nothing else."
     
     payload = {
-        "provider": "gemini",
+        "provider": "deepseek-chat",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": context}

@@ -8,10 +8,10 @@ async def query_llm_stream():
     """Query the LLM Gateway using a streaming connection."""
     base_url = os.environ.get("LLM_GATEWAY_URL", "http://127.0.0.1/llm")
     
-    # Use a provider that is ready (e.g., groq or gemini)
+    # Use a provider that is ready (e.g., deepseek-chat or opencode/deepseek-v4-flash-free)
     # This request asks for a streaming response.
     payload = {
-        "provider": "gemini",
+        "provider": "deepseek-chat",
         "messages": [
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": "Tell me a short, fun story about a robot who discovers music."}
