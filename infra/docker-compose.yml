@@ -291,6 +291,9 @@ services:
     environment:
       - INFERENCE_GATEWAY_PORT=8005
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ../services/inference-gateway/config:/app/config:ro

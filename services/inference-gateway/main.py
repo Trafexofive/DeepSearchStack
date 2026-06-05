@@ -16,6 +16,7 @@ from typing import Optional
 from models.requests import ChatCompletionRequest
 from models.responses import ChatCompletionResponse, ModelCatalogResponse, ModelInfo
 from providers.deepseek_provider import DeepSeekProvider
+from providers.groq_provider import GroqProvider
 from providers.nvidia_nim_provider import NvidiaNimProvider
 from providers.opencode_provider import OpenCodeProvider
 
@@ -37,6 +38,7 @@ def _init_providers() -> dict:
 
     specs = [
         ("deepseek",    DeepSeekProvider,   "DEEPSEEK_API_KEY"),
+        ("groq",        GroqProvider,       "GROQ_API_KEY"),
         ("nvidia_nim",  NvidiaNimProvider,  "NVIDIA_API_KEY"),
         # OpenCode free tier works without an API key (no env var needed)
         ("opencode",    OpenCodeProvider,   "OPENCODE_API_KEY",  True),
@@ -101,6 +103,12 @@ async def discover_models():
             ModelInfo(id="nemotron-3-super-free", provider="opencode", owned_by="nvidia", context_length=128000),
             ModelInfo(id="minimax-m3-free", provider="opencode", owned_by="minimax", context_length=200000),
         ],
+        "groq": [
+            ModelInfo(id="llama-3.1-8b-instant", provider="groq", owned_by="meta", context_length=128000),
+            ModelInfo(id="llama-3.3-70b-versatile", provider="groq", owned_by="meta", context_length=128000),
+            ModelInfo(id="mixtral-8x7b-32768", provider="groq", owned_by="mistral-ai", context_length=32768),
+            ModelInfo(id="gemma2-9b-it", provider="groq", owned_by="google", context_length=8192),
+        ],
         "nvidia_nim": [
             ModelInfo(id="zhipuai/glm-4-9b-chat", provider="nvidia_nim", owned_by="zhipu-ai", context_length=131072),
             ModelInfo(id="minimax/minimax-m1", provider="nvidia_nim", owned_by="minimax", context_length=4194304),
@@ -150,6 +158,8 @@ VIRTUAL_MODELS: dict[str, list[dict]] = {
         {"provider": "opencode", "model": "minimax-m3-free"},
         {"provider": "opencode", "model": "mimo-v2.5-free"},
         {"provider": "opencode", "model": "qwen3.6-plus-free"},
+        {"provider": "groq",     "model": "llama-3.3-70b-versatile"},
+        {"provider": "groq",     "model": "llama-3.1-8b-instant"},
         {"provider": "deepseek",  "model": "deepseek-chat"},
     ],
     # Same chain but with the cheaper, faster models preferred for
@@ -158,6 +168,7 @@ VIRTUAL_MODELS: dict[str, list[dict]] = {
         {"provider": "opencode", "model": "deepseek-v4-flash-free"},
         {"provider": "opencode", "model": "mimo-v2.5-free"},
         {"provider": "opencode", "model": "qwen3.6-plus-free"},
+        {"provider": "groq",     "model": "llama-3.1-8b-instant"},
         {"provider": "deepseek",  "model": "deepseek-chat"},
     ],
     # Same chain but the reasoning-capable models first (for blog
@@ -166,6 +177,7 @@ VIRTUAL_MODELS: dict[str, list[dict]] = {
         {"provider": "opencode", "model": "nemotron-3-super-free"},
         {"provider": "opencode", "model": "minimax-m3-free"},
         {"provider": "opencode", "model": "deepseek-v4-flash-free"},
+        {"provider": "groq",     "model": "llama-3.3-70b-versatile"},
         {"provider": "deepseek",  "model": "deepseek-reasoner"},
     ],
     # Extend with multi-provider fallback chains:
@@ -247,46 +259,125 @@ async def _single_request(request: ChatCompletionRequest, provider_name: str) ->
         raise HTTPException(status_code=502, detail=f"Network error: {str(e)}")
 
 
-async def _cascade(request: ChatCompletionRequest) -> ChatCompletionResponse:
-    """Try each provider in a virtual model's fallback chain until one succeeds."""
+async def _cascade(request: ChatCompletionRequest):
+    """Try each provider in a virtual model's fallback chain until one succeeds.
+
+    Dispatches to stream or non-stream handler based on request.stream.
+    Both variants share error-classification: a real provider error
+    (HTTPStatusError or RequestError) triggers fallthrough; transient
+    stream chunks are not treated as errors.
+    """
     route_list = VIRTUAL_MODELS.get(request.model)
     if not route_list:
         raise HTTPException(status_code=400, detail=f"Unknown virtual model: {request.model}")
 
+    if request.stream:
+        return StreamingResponse(
+            _cascade_stream_generator(request, route_list),
+            media_type="text/event-stream",
+        )
+    return await _cascade_non_streaming(request, route_list)
+
+
+def _is_fallthrough_error(e: Exception) -> bool:
+    """Should the cascade move to the next provider on this error?
+
+    Fallthrough on:
+      - 429 (rate limit)
+      - 402 (payment required — wallet out)
+      - 503 (service unavailable)
+      - 504 (gateway timeout)
+      - Any network/RequestError (connection failed, timeout, etc.)
+    Raise immediately on:
+      - 400 (bad request — won't help to retry elsewhere)
+      - 401/403 (auth — won't help, missing key)
+      - 422 (validation — request is malformed)
+    """
+    if isinstance(e, httpx.HTTPStatusError):
+        return e.response.status_code in {429, 402, 503, 504}
+    if isinstance(e, httpx.RequestError):
+        return True
+    return False
+
+
+async def _cascade_non_streaming(request, route_list) -> ChatCompletionResponse:
+    """Non-streaming cascade: try each route, fall through on recoverable errors."""
     last_error = None
 
     for route in route_list:
         provider_name = route["provider"]
         provider = providers.get(provider_name)
-
         if not provider:
             logger.info(f"Cascade: skipping {provider_name} (not configured)")
             continue
 
         req_copy = request.model_copy(update={"model": route["model"]})
-
         try:
             logger.info(f"Cascade: trying {provider_name}/{route['model']}")
             response = await provider.chat(req_copy)
             logger.info(f"Cascade: success on {provider_name}/{route['model']}")
             return response
-
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code in {429, 402, 503}:
-                logger.warning(f"Cascade: {provider_name} returned {e.response.status_code}, trying next...")
+        except Exception as e:
+            if _is_fallthrough_error(e):
+                status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else "network"
+                logger.warning(f"Cascade: {provider_name} returned {status}, trying next")
                 last_error = e
                 continue
-            raise HTTPException(status_code=e.response.status_code, detail=f"Upstream error from {provider_name}: {e.response.text[:500]}")
-
-        except httpx.RequestError as e:
-            logger.warning(f"Cascade: {provider_name} network error: {e}")
-            last_error = e
-            continue
+            # Non-fallthrough: re-raise as 502/500 with the actual error preserved
+            logger.exception(f"Cascade: {provider_name} hard error, not falling through")
+            raise HTTPException(
+                status_code=502 if isinstance(e, httpx.RequestError) else 500,
+                detail=f"Provider {provider_name} error: {type(e).__name__}: {e}",
+            )
 
     raise HTTPException(
         status_code=429,
         detail=f"All providers in virtual model '{request.model}' exhausted. Last error: {last_error}",
     )
+
+
+async def _cascade_stream_generator(request, route_list):
+    """Streaming cascade: yield chunks from the first successful provider.
+
+    On a fallthrough error, silently move to the next route. The client
+    only sees chunks from the SUCCESSFUL route (clean UX). If all
+    routes fail, yield a single error event as the last chunk and
+    return.
+    """
+    last_error = None
+
+    for i, route in enumerate(route_list):
+        provider_name = route["provider"]
+        provider = providers.get(provider_name)
+        if not provider:
+            logger.info(f"Cascade: skipping {provider_name} (not configured)")
+            continue
+
+        req_copy = request.model_copy(update={"model": route["model"]})
+        try:
+            logger.info(f"Cascade stream: trying {provider_name}/{route['model']}")
+            chunk_count = 0
+            async for chunk in provider.chat_stream(req_copy):
+                yield f"data: {json.dumps(chunk)}\n\n"
+                chunk_count += 1
+            yield "data: [DONE]\n\n"
+            logger.info(f"Cascade stream: success on {provider_name}/{route['model']} ({chunk_count} chunks)")
+            return
+        except Exception as e:
+            if _is_fallthrough_error(e):
+                status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else "network"
+                logger.warning(f"Cascade stream: {provider_name} returned {status}, trying next")
+                last_error = e
+                continue
+            # Non-fallthrough: yield an error event and stop
+            logger.exception(f"Cascade stream: {provider_name} hard error, not falling through")
+            err = {"error": {"message": f"Provider {provider_name} error: {type(e).__name__}: {str(e)[:200]}", "step": i}}
+            yield f"data: {json.dumps(err)}\n\n"
+            return
+
+    # All routes failed
+    err = {"error": {"message": f"All cascade steps exhausted. Last error: {last_error}", "cascade_exhausted": True}}
+    yield f"data: {json.dumps(err)}\n\n"
 
 
 # ─── Shutdown ────────────────────────────────────────────────────────────────
