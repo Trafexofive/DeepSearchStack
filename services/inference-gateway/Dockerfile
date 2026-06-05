@@ -6,6 +6,7 @@ WORKDIR /app
 COPY services/inference-gateway/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY libs/ /app/libs/
 COPY services/inference-gateway/ /app/
 
 EXPOSE 8005
