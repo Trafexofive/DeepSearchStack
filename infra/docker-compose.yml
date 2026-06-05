@@ -9,6 +9,8 @@ volumes:
   redis_data:
   vector_data:
   warehouse_data:
+  crawler_cache:
+  web_api_data:
 
 networks:
   deepsearch_net:

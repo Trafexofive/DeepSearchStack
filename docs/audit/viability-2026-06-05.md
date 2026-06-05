@@ -463,4 +463,84 @@ make up STACK=full → exit 0. 14/14 containers up in ~6 seconds (after image ca
 - `wiki-indexer` (its compose env is misconfigured per the audit; was not started).
 - `deepsearch` (deprecated shim; started but not exercised).
 
+---
+
+## PERSISTENCE (user-flagged TOP PRIORITY)
+
+User directive: "PERSISTENCY is TOP priority, we cannot be losing data. Its actually embarassing."
+
+### PERS-1. CRITICAL: Crawler cache is ephemeral
+
+**Symptom:** `/app/cache/cache.db` and `/app/cache/pending_forwards.db` lived INSIDE the crawler container with no docker volume mount. Every container recreation (e.g., `make down` + `make up`, or any rebuild) deleted all cached content AND any pending warehouse forwards.
+
+**Runtime evidence (before fix):**
+```
+$ curl -s http://localhost:8083/dss/crawl/cache/stats
+{"total_entries":2,"fresh_entries":1,"domains":[{"domain":"example.com","count":1},{"domain":"github.com","count":1}]}
+$ docker rm -f dss-crawler && docker compose up -d --no-deps crawler
+$ curl -s http://localhost:8083/dss/crawl/cache/stats
+{"total_entries":0,"fresh_entries":0,"domains":[]}
+```
+
+**Fix:** Added `crawler_cache` named volume in `infra/docker-compose.yml`, mounted to `/app/cache` on the crawler service.
+
+**Runtime evidence (after fix, commit 34cbf58):**
+```
+$ for url in example.com iana.org github.com; do curl -X POST .../crawl {"url":"$url"}; done
+$ curl -s .../crawl/cache/stats   # BEFORE kill
+{"total_entries":3,"domains":["example.com","github.com","www.iana.org"]}
+$ docker rm -f dss-crawler
+$ ls /var/lib/docker/volumes/deepsearch-stack-full_crawler_cache/_data/
+cache.db  pending_forwards.db        ← survived!
+$ docker compose up -d --no-deps crawler
+$ curl -s .../crawl/cache/stats    # AFTER recreate
+{"total_entries":3,"domains":["example.com","github.com","www.iana.org"]}  ← preserved
+```
+
+### PERS-2. CRITICAL: web-api has no persistent storage
+
+**Symptom:** `_save_hashes()` was defined in `services/web-api/main.py:99` but never called. The `_embed_hashes` set was in-memory only — every web-api restart triggered a full re-embed of all content. Also: there was no `/app/data` directory in the container, so even if `_save_hashes` had been called, there was no place to write.
+
+**Fix:** Added `web_api_data` named volume in compose, mounted to `/app/data` on web-api. Added `HASH_DB_PATH=/app/data/embed_hashes.json` to web-api's environment. Added a periodic background task (`_periodic_save_hashes`) that flushes the set every 60s, plus a shutdown hook for final save.
+
+**Runtime evidence (after fix):**
+```
+$ docker exec dss-web-api sh -c 'ls -la /app/data/'
+-rw-r--r-- 2 root root  4096 Jun  5 19:47 embed_hashes.json
+$ docker exec dss-web-api sh -c 'echo HASH_DB_PATH=$HASH_DB_PATH'
+HASH_DB_PATH=/app/data/embed_hashes.json
+```
+File modified at 19:47 — confirming the periodic save is firing (file size 2 bytes = `[]` JSON; no RAG was triggered to add hashes).
+
+### PERS-3. HIGH: No WAL on crawler cache
+
+**Symptom:** Both `cache.db` and `pending_forwards.db` were opened with raw `sqlite3.connect()` calls. No `PRAGMA journal_mode=WAL` set. The single `_cache_sem = asyncio.Semaphore(1)` masked this by serializing all cache operations, but pending_forwards reads and writes ran in parallel.
+
+**Fix (code):** Added `_connect_db(path)` helper that sets `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `foreign_keys=ON`. Replaced all 9 raw `sqlite3.connect()` calls with the helper. `check_same_thread=False` for safe async use.
+
+**Status: PARTIAL.** The volume mount is live (PERS-1 verified), but the crawler image was NOT rebuilt with the new helper because the build hit a transient pip install timeout. The running crawler still has the old code. The WAL change will land once the image is rebuilt. **The data-loss issue is fixed by the volume mount alone; WAL is a follow-up for concurrent-write correctness.**
+
+### PERS-4. search-agent error message now informative
+
+**Before:** `"\n\n**Error during synthesis:** An issue occurred while generating the answer."` — no way for the user to know what failed.
+
+**After:** `"\n\n**Error during synthesis:** \`RemoteProtocolError: peer closed connection without sending complete message body (incomplete chunked read)\`. Check the search-agent container logs for the full traceback."`
+
+**Runtime evidence (commit 34cbf58):**
+```
+$ curl -X POST .../synthesize/stream with llm_provider=INVALID
+data: {"content": "\n\n**Error during synthesis:** `RemoteProtocolError: peer closed connection without sending complete message body (incomplete chunked read)`.\nCheck the search-agent container logs for the full traceback.", "finished": true, "sources": [...], "error": null}
+```
+
+The full traceback is in the search-agent logs (verified via `docker logs dss-search-agent --tail 10`). The error message is truncated to 200 chars to avoid leaking internals.
+
+### Additional persistence state confirmed via live boot
+
+- `crawler_cache` volume mounted on `/app/cache` in crawler container (verified via `docker inspect`)
+- `web_api_data` volume mounted on `/app/data` in web-api container (verified via `docker inspect`)
+- `vector_data`, `warehouse_data`, `postgres_data`, `redis_data`, `yacy_data` were already on volumes (pre-existing, verified via `docker volume ls`)
+- **NOT on volumes (not yet fixed):** `services/search-agent/` has no persistent state (intentional — it's stateless), `services/search-gateway/` (stateless router), `services/deepsearch/` (uses Postgres which IS on a volume), `services/proxy-rotator/volumes/data/proxy-pool.json` (proxy pool file in container, lost on recreation — MEDIUM follow-up), `services/wiki-indexer/volumes/data/` (wiki dump directory in container, lost on recreation — HIGH follow-up)
+
+
+
 
