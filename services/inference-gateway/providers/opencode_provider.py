@@ -83,7 +83,15 @@ class OpenCodeProvider(BaseProvider):
                         continue
 
     def _build_payload(self, request: ChatCompletionRequest) -> dict:
-        """Build payload with DeepSeek-compatible config."""
+        """Build payload with DeepSeek-compatible config.
+
+        Cap max_tokens at 8K (audit L182) — 128K was excessive for the
+        free tier and could cause upstream rate-limit rejections. The
+        cap is applied unconditionally, not just as a default, because
+        Pydantic always fills max_tokens with a value (default 1024),
+        so setdefault never fires. The cap protects against both the
+        "user didn't set it" and "user set it too high" cases.
+        """
         payload = request.model_dump(exclude_none=True)
-        payload.setdefault("max_tokens", 128000)
+        payload["max_tokens"] = min(payload.get("max_tokens") or 8192, 8192)
         return payload

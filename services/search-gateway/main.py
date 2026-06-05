@@ -72,7 +72,18 @@ class SearchGateway:
         return limited_results
 
     def _fuse_and_deduplicate(self, all_results: List[SearchResult]) -> List[SearchResult]:
-        return list({result.url: result for result in all_results if result.url}.values())
+        """Dedupe by URL with normalization (audit L74).
+
+        Without normalization, 'https://example.com' and
+        'https://example.com/' (and 'HTTPS://Example.com/foo?utm_source=x')
+        are treated as distinct. Now all canonicalize to the same key.
+        """
+        from libs.common.text import normalize_url
+        return list({
+            normalize_url(result.url): result
+            for result in all_results
+            if result.url
+        }.values())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

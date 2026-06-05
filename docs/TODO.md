@@ -93,30 +93,104 @@
 
 ---
 
-### **EPIC 5.5: UX - Clean E2E TUI (using the SDK logically)**
+### **EPIC 5.5: UX - Clean & Comprehensive E2E TUI (using the SDK)**
 - **Priority:** Medium
 - **Est. Time:** 2 Days
-- **Description:** Build a terminal UI client that exercises the full DeepSearchStack pipeline end-to-end through the Python SDK (`sdk/python/deepsearch.py`). The TUI should be a developer-facing tool for smoke-testing the stack and demoing the search → scrape → embed → retrieve → synthesize flow without a browser. It must logically call the SDK, not raw HTTP, so it stays a real consumer of the public API surface.
+- **Description:** Build a **production-quality** terminal UI client that exercises the entire DeepSearchStack pipeline end-to-end through the Python SDK (`sdk/python/deepsearch.py`). This is a real developer tool, not a demo. It must logically call the SDK so it stays a true consumer of the public API surface — every gap in the SDK that the TUI needs filled is a real gap, and that's the point of building it. The user explicitly said "I dont play with my TUIs" — a half-day proof-of-concept is not acceptable; the bar is a real client that someone would actually use daily.
 
 - **Tasks:**
+
     - **`[ ]` 5.5.1: Pick TUI framework**
-        - `[ ]` 5.5.1.1: Evaluate options: `textual` (rich, async-native), `prompt_toolkit` (lighter), `rich` (panels + live display). Default: `textual`.
-        - `[ ]` 5.5.1.2: Add chosen TUI lib to `sdk/python/requirements.txt`.
-    - **`[ ]` 5.5.2: Wire to SDK, not raw HTTP**
-        - `[ ]` 5.5.2.1: Import `DeepSearchClient` from `sdk.python.deepsearch`. No `httpx` calls in the TUI module.
-        - `[ ]` 5.5.2.2: Expose SDK methods the TUI needs: `search`, `crawl`, `llm_complete`, plus a new `aggregate` wrapper if not present.
-        - `[ ]` 5.5.2.3: Stream SDK results into the TUI (SSE for `/api/search/stream`).
-    - **`[ ]` 5.5.3: E2E pipeline view**
-        - `[ ]` 5.5.3.1: Side panel: list of search providers queried + their status (hit / miss / error).
-        - `[ ]` 5.5.3.2: Main panel: streaming synthesis with bracket citations highlighted.
-        - `[ ]` 5.5.3.3: Bottom panel: source URLs (clickable / copyable).
-    - **`[ ]` 5.5.4: Containerize**
-        - `[ ]` 5.5.4.1: Dockerfile at `sdk/python/tui/Dockerfile` (python:3.12-slim + textual + the SDK installed in editable mode).
-        - `[ ]` 5.5.4.2: Add to `infra/docker-compose.yml` as `tui` service (no port, `tty: true`, `stdin_open: true` for `docker attach`).
-        - `[ ]` 5.5.4.3: `make tui` target that runs `docker compose run --rm tui` and connects to the running stack.
-    - **`[ ]` 5.5.5: Smoke test against the stack**
-        - `[ ]` 5.5.5.1: Run the TUI against a live `make up` stack; verify all 5 stages appear in the UI.
-        - `[ ]` 5.5.5.2: Document in `sdk/python/README.md` under a new "TUI" section.
+        - `[ ]` 5.5.1.1: Evaluate: `textual` (async-native, CSS-like styling, mouse + keyboard), `prompt_toolkit` (lighter, prompt-style), `rich.live` (no widgets). Default: `textual` — production-grade and modern.
+        - `[ ]` 5.5.1.2: Add to `sdk/python/requirements.txt`. Pin version.
+
+    - **`[ ]` 5.5.2: SDK contract (do this FIRST, before any UI work)**
+        - `[ ]` 5.5.2.1: Audit `sdk/python/deepsearch.py`. List every method the TUI needs:
+            - `search(query, providers, max_results, timeout)` — non-streaming
+            - `aggregate(query, providers, max_results)` — non-streaming
+            - `synthesize(query, sources, llm_model, llm_provider, stream=True)` — streaming
+            - `crawl(url, formats, forward_to_warehouse)` — single + batch
+            - `llm_complete(messages, model, stream)` — direct LLM
+            - `embed(documents, namespace)` — vector store
+            - `warehouse_search(query, domain, limit)` — knowledge warehouse
+            - `list_providers()` / `list_models()` — introspection
+        - `[ ]` 5.5.2.2: Add **every** missing method. The TUI surfaces SDK gaps by demanding real methods.
+        - `[ ]` 5.5.2.3: Every method gets a `*_stream()` async generator variant where applicable.
+        - `[ ]` 5.5.2.4: Type hints everywhere. Runtime validation (pydantic) on the response side.
+        - `[ ]` 5.5.2.5: Error envelope: every method returns `(result, error)` tuple, never raises on transport. TUI displays the error nicely.
+
+    - **`[ ]` 5.5.3: TUI shell + navigation**
+        - `[ ]` 5.5.3.1: Full-screen layout (Textual `App`).
+        - `[ ]` 5.5.3.2: Bottom status bar: `stack: up | model: virtual/free-coder | session: abc123 | 12 results in 3.4s`.
+        - `[ ]` 5.5.3.3: Top tabs: `Search | Synthesize | Crawl | LLM | Embed | Warehouse | Settings | Help`.
+        - `[ ]` 5.5.3.4: Keyboard shortcuts everywhere. `?` opens help, `Ctrl+C` exits, `Ctrl+L` clears, `Tab` cycles focus, `Esc` cancels in-flight.
+        - `[ ]` 5.5.3.5: Mouse support (clicking a tab, scrolling, selecting sources).
+        - `[ ]` 5.5.3.6: Resize handling — panels reflow, no overflow.
+
+    - **`[ ]` 5.5.4: Search tab (E2E the pipeline)**
+        - `[ ]` 5.5.4.1: Multi-line input prompt (Enter inserts newline, Ctrl+Enter submits).
+        - `[ ]` 5.5.4.2: Provider picker: checkbox list, defaults from `AGGREGATE_PROVIDERS` env. Visible count of selected.
+        - `[ ]` 5.5.4.3: Submit → call `client.aggregate()`.
+        - `[ ]` 5.5.4.4: Side panel: per-provider result list with status (hit count, latency, error if any).
+        - `[ ]` 5.5.4.5: Main panel: auto-synthesize with `client.synthesize(stream=True)`. Render citations `[1]`, `[2]` as clickable. **Validate citations live** (call `validate_citations` from the SDK and show a warning banner if any [N] are out of range).
+        - `[ ]` 5.5.4.6: Bottom panel: source list (URL, title, domain). `Enter` to open in browser, `y` to copy URL, `o` to open in `$BROWSER`.
+        - `[ ]` 5.5.4.7: `/scrape` subcommand: select N sources, scrape, show markdown.
+
+    - **`[ ]` 5.5.5: Synthesize tab (LLM-only)**
+        - `[ ]` 5.5.5.1: Paste sources (JSON or text), prompt input.
+        - `[ ]` 5.5.5.2: Model picker: dropdown of `client.list_models()`. **Default to `virtual/free-coder` cascade** (deepseek wallet is unreliable; opencode free is the safe default).
+        - `[ ]` 5.5.5.3: Stream the synthesis. Show token/sec, TTFT (time to first token).
+        - `[ ]` 5.5.5.4: Citation validation warning (same as Search tab).
+        - `[ ]` 5.5.5.5: Re-run button (same prompt, different model — for A/B).
+
+    - **`[ ]` 5.5.6: LLM tab (direct completion)**
+        - `[ ]` 5.5.6.1: System prompt editor (multi-line).
+        - `[ ]` 5.5.6.2: User message input.
+        - `[ ]` 5.5.6.3: Model picker (same as Synthesize).
+        - `[ ]` 5.5.6.4: Stream the completion. Show raw reasoning_content (if `deepseek-reasoner` style).
+        - `[ ]` 5.5.6.5: Token count, latency. Save conversation to history.
+
+    - **`[ ]` 5.5.7: Crawl tab**
+        - `[ ]` 5.5.7.1: Single URL mode: progress indicator during crawl, show extracted markdown.
+        - `[ ]` 5.5.7.2: Batch mode: paste N URLs, see per-URL status, download all as a single markdown bundle.
+        - `[ ]` 5.5.7.3: Toggle `forward_to_warehouse`. Show warehouse confirmation.
+
+    - **`[ ]` 5.5.8: Embed + Warehouse tabs**
+        - `[ ]` 5.5.8.1: Embed: paste text or upload file, choose namespace, embed + show returned IDs + counts.
+        - `[ ]` 5.5.8.2: Warehouse: query, domain filter, see results in a table (URL, title, snippet, ingested_at, word_count).
+
+    - **`[ ]` 5.5.9: Settings tab**
+        - `[ ]` 5.5.9.1: Override `DEEPSEEK_BASE_URL` (e.g., point at `localhost:8083` for stack).
+        - `[ ]` 5.5.9.2: Set default model.
+        - `[ ]` 5.5.9.3: Toggle streaming on/off.
+        - `[ ]` 5.5.9.4: Set per-request timeout.
+        - `[ ]` 5.5.9.5: Persist settings to `~/.config/deepsearch/tui.toml` (TOML, not JSON — hand-editable).
+        - `[ ]` 5.5.9.6: Reload settings without restart.
+
+    - **`[ ]` 5.5.10: History + session**
+        - `[ ]` 5.5.10.1: Every query is logged to a session file (`~/.local/share/deepsearch/sessions/<id>.jsonl`).
+        - `[ ]` 5.5.10.2: `/history` shows last 50 queries; `↑`/`↓` to recall.
+        - `[ ]` 5.5.10.3: `/resume <id>` restores a session: replays queries into the chat panel.
+
+    - **`[ ]` 5.5.11: Help + error UX**
+        - `[ ]` 5.5.11.1: `?` opens full help (keyboard map, command list, examples).
+        - `[ ]` 5.5.11.2: Errors are **never** silent. Every transport / parse / validation error shows a banner with the exception type and message + a hint. No bare tracebacks — they're logged, not displayed.
+        - `[ ]` 5.5.11.3: Cancellation (Esc) cleans up the in-flight task. No zombie connections.
+
+    - **`[ ]` 5.5.12: Containerize**
+        - `[ ]` 5.5.12.1: `sdk/python/tui/Dockerfile` (python:3.12-slim + textual + SDK in editable mode).
+        - `[ ]` 5.5.12.2: Add `tui` service to `infra/docker-compose.yml` — `tty: true`, `stdin_open: true`, no port, depends_on web-api healthy.
+        - `[ ]` 5.5.12.3: `make tui` target → `docker compose -f infra/docker-compose.yml run --rm tui`.
+
+    - **`[ ]` 5.5.13: Smoke tests + docs**
+        - `[ ]` 5.5.13.1: Script `sdk/python/tui/test_e2e.sh` that runs the TUI against `make up`, exercises each tab, captures screenshots via `textual screenshot` (headless mode).
+        - `[ ]` 5.5.13.2: Screenshots committed under `sdk/python/tui/screenshots/` for the README.
+        - `[ ]` 5.5.13.3: New `sdk/python/README.md` section "TUI" with screenshots, install, quickstart.
+        - `[ ]` 5.5.13.4: Final pass: every SDK method touched by the TUI is documented in the SDK README.
+
+    - **`[ ]` 5.5.14: SDK gap report** (the whole point)
+        - `[ ]` 5.5.14.1: As the TUI is built, every time you needed a method that didn't exist, file a follow-up in `docs/TODO.md` (or open a TODO under a new "SDK gaps" EPIC).
+        - `[ ]` 5.5.14.2: At the end, the TUI should drive a meaningful chunk of new SDK work. If it didn't, the SDK is too thin.
 
 ### **EPIC 5: UI/UX - Integrate Chimera Frontend**
 - **Priority:** Low

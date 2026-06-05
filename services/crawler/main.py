@@ -20,54 +20,20 @@ from crawl4ai import AsyncWebCrawler, CacheMode
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-# ── Boilerplate stripping ─────────────────────────────────────────────────
+# ── Boilerplate stripping (DRY: single source of truth in libs/common/text.py) ─────────
 
+from libs.common.text import strip_boilerplate as _strip_boilerplate_unwrapped
 import re as _re
 
-_BOILERPLATE_PATTERNS = [
-    _re.compile(r, _re.IGNORECASE) for r in [
-        r'^\[Jump to content\]', r'^\[Skip to (content|main|navigation)\]',
-        r'^Main menu$', r'^move to sidebar', r'^(Navigation|Contents|Menu)\s*$',
-        r'^\[.*?(Privacy|Terms|Cookie|Legal|Accessibility)\]',
-        r'^(Cookie|Privacy|Terms|Legal|Accessibility)\b',
-        r'^(Theme|Language|Version)\s+(Auto|Light|Dark)',
-        r'^(Previous|Next) topic', r'^Keyboard shortcuts$',
-        r'^Press .(←|→|S|\?|Esc). to', r'^\[.*?\]\(https?://.*?(privacy|terms|cookie)\)',
-        r'^\[ Sign in \]', r'^Sign in$', r'^Navigation Menu$',
-        r'^Toggle navigation$', r'^Search or jump to',
-    ]
-]
-_BOILERPLATE_SECTIONS = [
-    'see also', 'references', 'external links', 'further reading',
-    'notes', 'footnotes', 'citations', 'bibliography', 'navigation menu',
-]
-
 def _strip_boilerplate(markdown: str) -> str:
+    """Crawler wrapper around the shared strip_boilerplate, preserving
+    the original behavior of collapsing 3+ newlines and falling back to
+    the input when stripping produces empty.
+    """
     if not markdown:
         return markdown
-    lines = markdown.split('\n')
-    cleaned = []
-    skip_section = False
-    skip_level = 0
-    for line in lines:
-        stripped = line.strip()
-        heading = _re.match(r'^(#{1,6})\s+', stripped)
-        if heading:
-            level = len(heading.group(1))
-            text = stripped[heading.end():].strip().lower()
-            if skip_section and level <= skip_level:
-                skip_section = False
-            if text in _BOILERPLATE_SECTIONS:
-                skip_section = True
-                skip_level = level
-                continue
-        if skip_section:
-            continue
-        if stripped and any(p.search(stripped) for p in _BOILERPLATE_PATTERNS):
-            continue
-        cleaned.append(line)
-    result = '\n'.join(cleaned).strip()
-    result = _re.sub(r'\n{3,}', '\n\n', result)
+    result = _strip_boilerplate_unwrapped(markdown)
+    result = _re.sub(r'\n{3,}', '\n\n', result).strip()
     return result if result else markdown
 
 

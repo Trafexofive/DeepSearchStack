@@ -58,9 +58,31 @@ def _generate_id(text: str) -> str:
 
 
 def _sanitize_metadata(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Coerce metadata values to ChromaDB-safe primitives.
+
+    Audit L120: the previous version coerced non-primitive values to str,
+    which silently lost nested dicts and lists (e.g., a 'tags' list
+    became the literal string "['a', 'b']"). Now we:
+      - Keep str, int, float, bool, None as-is
+      - Coerce lists and dicts to JSON strings (preserves structure,
+        inspectable later)
+      - Coerce anything else to str
+      - Drop None values
+    """
+    import json
     if not meta:
         return {}
-    return {k: v if isinstance(v, (str, int, float, bool)) else str(v) for k, v in meta.items() if v is not None}
+    out: Dict[str, Any] = {}
+    for k, v in meta.items():
+        if v is None:
+            continue
+        if isinstance(v, (str, int, float, bool)):
+            out[k] = v
+        elif isinstance(v, (list, dict)):
+            out[k] = json.dumps(v, ensure_ascii=False)
+        else:
+            out[k] = str(v)
+    return out
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
