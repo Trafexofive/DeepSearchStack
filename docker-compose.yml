@@ -56,28 +56,6 @@ services:
     ports:
       - "8002:8002"
 
-  deepsearch:
-    build:
-      context: .
-      dockerfile: services/deepsearch/Dockerfile
-    container_name: dss-deepsearch
-    restart: unless-stopped
-    networks: [deepsearch_net]
-    depends_on:
-      search-gateway: {condition: service_started}
-      postgres: {condition: service_healthy}
-      redis: {condition: service_healthy}
-    environment:
-      - SEARCH_GATEWAY_URL=http://search-gateway:8002
-      - INFERENCE_GATEWAY_URL=http://inference-gateway:8005
-      - VECTOR_STORE_URL=http://vector-store:8004
-      - CRAWLER_URL=http://crawler:8000
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - REDIS_URL=redis://redis:6379/0
-      - POSTGRES_URL=postgresql://searchuser:searchpass@postgres:5432/searchdb
-    ports:
-      - "8001:8001"
-
   vector-store:
     build:
       context: .

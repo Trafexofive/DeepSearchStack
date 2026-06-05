@@ -31,7 +31,6 @@ services:
       - deepsearch_net
     depends_on:
       - web-api
-      - deepsearch
       - crawler
       - knowledge-warehouse
       - vector-store
@@ -94,38 +93,6 @@ services:
       - WHOOGLE_URL=http://whoogle:5000
       - SEARXNG_URL=http://searxng:8080
       - REDIS_URL=redis://redis:6379/0
-
-  deepsearch:
-    build:
-      context: ..
-      dockerfile: services/deepsearch/Dockerfile
-    container_name: dss-deepsearch
-    restart: unless-stopped
-    networks:
-      - deepsearch_net
-    depends_on:
-      inference-gateway:
-        condition: service_started
-      search-gateway:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      - SEARCH_GATEWAY_URL=http://search-gateway:8002
-      - INFERENCE_GATEWAY_URL=http://inference-gateway:8005
-      - VECTOR_STORE_URL=http://vector-store:8004
-      - CRAWLER_URL=http://crawler:8000
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - REDIS_URL=redis://redis:6379/0
-      - POSTGRES_URL=postgresql://searchuser:searchpass@postgres:5432/searchdb
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
 
   # --- SEARCH BACKENDS ---
   yacy:

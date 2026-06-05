@@ -310,12 +310,20 @@ async def search(
     """Full-text search across stored content."""
     conn = _read_conn()
     try:
-        query = q.replace("'", "''")
-        where = ""
+        # FTS5 MATCH syntax: wrap user input in double-quotes and escape
+        # internal double-quotes to keep the query a single literal term.
+        # FTS5 doesn't support ?-param placeholders inside the MATCH
+        # expression, so we sanitize the input ourselves.
+        query = '"' + q.replace('"', '""') + '"'
+
+        sql_params: list = [query]
+        where_clauses: list[str] = []
         if domain:
-            where = (
-                f"AND c.source_domain = '{domain.replace(chr(39), chr(39)+chr(39))}'"
-            )
+            where_clauses.append("c.source_domain = ?")
+            sql_params.append(domain)
+
+        where = ("AND " + " AND ".join(where_clauses)) if where_clauses else ""
+        sql_params.append(limit)
 
         rows = conn.execute(
             f"""
@@ -327,7 +335,7 @@ async def search(
             ORDER BY rank
             LIMIT ?
         """,
-            (query, limit),
+            sql_params,
         ).fetchall()
 
         return [
