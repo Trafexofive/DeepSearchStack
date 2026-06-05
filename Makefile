@@ -43,7 +43,7 @@ service ?=
 SERVICE_FLAG := $(if $(service),$(service),)
 
 .DEFAULT_GOAL := help
-.PHONY: help validate-stack validate-service env-check setup up down restart stop logs ps status build rebuild clean fclean prune shell exec health list-stacks create-networks
+.PHONY: help validate-stack validate-service env-check setup up down restart stop logs ps status build rebuild clean fclean prune shell exec health list-stacks create-networks full full-down full-restart light light-down light-restart test test-down test-restart
 
 # ======================================================================================
 # VALIDATION HELPERS
@@ -281,10 +281,35 @@ help:
 	@echo -e "  ps/status            - Show container status"
 	@echo -e "  list-stacks          - Dashboard of all stacks"
 	@echo -e "  health               - Health check report"
+	@echo -e "  ping                 - Quick HTTP health on every service (via nginx)"
+	@echo -e "  errors               - Last ERROR/Exception lines across the stack"
+	@echo -e "  stats                - docker stats scoped to this stack"
 	@echo ""
 	@echo -e "$(GREEN)Utilities:$(NC)"
 	@echo -e "  shell service=<name> - Interactive shell in container"
 	@echo -e "  exec service=<name> cmd=\"<cmd>\" - Execute command"
+	@echo -e "  audit/todo/versions  - Repo info at a glance"
+	@echo -e "  check-deps/env-diff  - Tooling + env file sanity"
+	@echo -e "  reboot               - down + up"
+	@echo ""
+	@echo -e "$(GREEN)SDK + TUI (DSS-specific QOL — at the bottom of this file):$(NC)"
+	@echo -e "  tui                  - Launch the DeepSearchStack TUI"
+	@echo -e "  tui-test             - Headless TUI smoke test"
+	@echo -e "  tui-screenshot       - Save TUI screenshot to svg"
+	@echo -e "  sdk-test             - Full SDK test suite (17 tests)"
+	@echo -e "  sdk-test-unit        - SDK unit tests only (no stack required)"
+	@echo -e "  sdk-install          - pip install SDK + TUI deps"
+	@echo -e "  sdk-repl             - Drop into a Python REPL with the SDK loaded"
+	@echo -e "  curl-catalog         - List 18 models in the inference catalog"
+	@echo -e "  curl-warehouse       - GET /dss/warehouse/stats"
+	@echo -e "  curl-llm             - One-shot LLM call (default model)"
+	@echo -e "  db-shell/db-stats/db-backup  - PostgreSQL shortcuts"
+	@echo -e "  redis-cli            - redis CLI"
+	@echo -e "  reset-{vectors,warehouse,cache,hashes}  - Wipe individual stores (no volume loss)"
+	@echo -e "  shell-web/shell-llm/shell-db/...   - Per-service shell aliases (no service= typing)"
+	@echo -e "  logs-web/logs-llm/logs-agent/...   - Per-service log aliases"
+	@echo -e "  e2e                  - sdk-test + tui-test (full E2E)"
+	@echo -e "  snapshot             - tui-screenshot + versions (for bug reports)"
 	@echo ""
 	@echo -e "$(GREEN)Cleanup:$(NC)"
 	@echo -e "  clean                - Stop and remove containers"
@@ -296,6 +321,10 @@ help:
 	@echo -e "  make logs STACK=full service=deepsearch"
 	@echo -e "  make restart STACK=full service=search-agent"
 	@echo -e "  make shell STACK=full service=inference-gateway"
+	@echo -e "  make tui                      # launch the TUI"
+	@echo -e "  make ping                     # health check all services"
+	@echo -e "  make errors                   # find recent errors in logs"
+	@echo -e "  make reset-vectors            # wipe the vector store, keep volumes"
 	@echo ""
 	@echo -e "$(GRAY)All operations support STACK= and service= parameters$(NC)"
 	@echo -e "$(BLUE)=========================================================================$(NC)"
@@ -330,3 +359,281 @@ test-down:
 
 test-restart:
 	@$(MAKE) restart STACK=test
+
+# ======================================================================================
+# REPO-SPECIFIC QOL  (DSS-only — keep above repo-agnostic)
+# ======================================================================================
+# Each rule below assumes a DSS context (services known, ports known,
+# SDK at sdk/python, audit doc at docs/audit/viability-2026-06-05.md).
+# If you copy this Makefile to a new project, these become dead code
+# and you can drop them.
+# ======================================================================================
+
+# --- SDK + TUI ----------------------------------------------------------
+
+SDK_DIR     := sdk/python
+TUI_DIR     := $(SDK_DIR)/tui
+AUDIT_DOC   := docs/audit/viability-2026-06-05.md
+TODO_DOC    := docs/TODO.md
+
+tui:
+	@if ! $(COMPOSE) ps --status running 2>/dev/null | grep -q web-api; then \
+		echo -e "$(RED)✖ web-api is not running. Run: make up STACK=full$(NC)"; \
+		exit 1; \
+	fi
+	@cd $(TUI_DIR) && python3 app.py $(TUI_FLAGS)
+
+tui-test:
+	@echo -e "$(BLUE)🧪 Running TUI smoke test (needs stack up)$(NC)"
+	@python3 $(TUI_DIR)/test_app.py
+
+tui-screenshot:
+	@echo -e "$(BLUE)📸 Capturing TUI screenshot (headless)$(NC)"
+	@python3 -c "import asyncio, sys; sys.path.insert(0, '$(TUI_DIR)'); \
+		from app import DeepSearchTUI; \
+		async def m(): \
+			from pathlib import Path; \
+			t = DeepSearchTUI(); \
+			async with t.run_test() as p: await p.pause(); \
+			Path('$(TUI_DIR)/screenshot.svg').write_text(t.export_screenshot(title='DeepSearchStack TUI')); \
+			print('saved $(TUI_DIR)/screenshot.svg'); \
+		asyncio.run(m())"
+
+sdk-install:
+	@echo -e "$(BLUE)📦 Installing SDK + TUI dependencies$(NC)"
+	@pip install --quiet --break-system-packages -r $(SDK_DIR)/requirements.txt 2>/dev/null \
+		|| pip install --quiet -r $(SDK_DIR)/requirements.txt
+	@echo -e "$(GREEN)✅ SDK ready at $(SDK_DIR)$(NC)"
+
+sdk-test:
+	@echo -e "$(BLUE)🧪 Running SDK unit + integration tests$(NC)"
+	@python3 $(SDK_DIR)/tests/test_deepsearch.py
+
+sdk-test-unit:
+	@echo -e "$(BLUE)🧪 Running SDK unit tests only (no stack required)$(NC)"
+	@python3 $(SDK_DIR)/tests/test_deepsearch.py --unit
+
+sdk-repl:
+	@cd $(SDK_DIR) && python3 -c "from deepsearch import DeepSearchClient; \
+		print('SDK ready. Use: c = DeepSearchClient(); c.<TAB>'); \
+		import code; code.interact(local=globals())"
+
+# --- Stack info / quick health -----------------------------------------
+
+ping:                                            # quick health check on every port
+	@echo -e "$(CYAN)🏓 Pinging all services (via nginx + direct)$(NC)"; \
+	ok=0; fail=0; \
+	for url in \
+		"http://localhost:8083/health                 web-api" \
+		"http://localhost:8083/dss/gateway/health     search-gateway" \
+		"http://localhost:8083/dss/agent/health       search-agent" \
+		"http://localhost:8083/dss/vectors/health     vector-store" \
+		"http://localhost:8005/health                 inference-gateway" \
+		"http://localhost:8083/dss/warehouse/health   knowledge-warehouse" \
+		"http://localhost:8083/dss/crawl/health       crawler" \
+		"http://localhost:8080/health                 proxy-rotator" \
+	; do \
+		u=$$(echo $$url | awk '{print $$1}'); \
+		n=$$(echo $$url | awk '{print $$2}'); \
+		if curl -sS -m 2 -o /dev/null -w '%{http_code}' $$u | grep -qE '^(2|3)'; then \
+			printf "  $(GREEN)●$(NC) %-22s %s\n" $$n $$u; ok=$$((ok+1)); \
+		else \
+			printf "  $(RED)●$(NC) %-22s %s\n" $$n $$u; fail=$$((fail+1)); \
+		fi; \
+	done; \
+	echo -e "  $(GREEN)$$ok up$(NC), $(RED)$$fail down$(NC)"
+
+audit:
+	@if [ -f $(AUDIT_DOC) ]; then \
+		echo -e "$(CYAN)📋 Latest audit: $(AUDIT_DOC)$(NC)"; \
+		grep -E '^##|CRITICAL|HIGH|MEDIUM|LOW' $(AUDIT_DOC) | head -30; \
+	else \
+		echo -e "$(YELLOW)No audit doc at $(AUDIT_DOC)$(NC)"; \
+	fi
+
+todo:
+	@if [ -f $(TODO_DOC) ]; then \
+		echo -e "$(CYAN)📋 TODO headlines:$(NC)"; \
+		grep -E '^#|^- \[' $(TODO_DOC) | head -20; \
+	else \
+		echo -e "$(YELLOW)No TODO doc at $(TODO_DOC)$(NC)"; \
+	fi
+
+versions:
+	@echo -e "$(CYAN)🔖 Versions$(NC)"; \
+	echo "  docker:  $$(docker --version 2>/dev/null | sed -E 's/^Docker version ([^,]+).*/\1/')"; \
+	echo "  compose: $$(docker compose version --short 2>/dev/null || docker compose version 2>/dev/null | awk '{print $$NF}')"; \
+	echo "  python:  $$(python3 --version 2>&1 | awk '{print $$2}')"; \
+	if $(COMPOSE) ps web-api 2>/dev/null | grep -q web-api; then \
+		$(COMPOSE) ps --format '  {{.Service}}: {{.Image}}' 2>/dev/null; \
+	else \
+		echo "  (stack not running)"; \
+	fi
+
+env-diff:
+	@if [ -f infra/env/.dev.env ] && [ -f .env.example ]; then \
+		diff -u infra/env/.dev.env .env.example | head -50 || true; \
+	else \
+		echo -e "$(YELLOW)Missing one of: infra/env/.dev.env or .env.example$(NC)"; \
+	fi
+
+check-deps:                                     # verify required CLI tools exist
+	@echo -e "$(CYAN)🔧 Checking required tools$(NC)"; \
+	for tool in docker curl jq python3 pip3; do \
+		if command -v $$tool >/dev/null 2>&1; then \
+			printf "  $(GREEN)✔$(NC) %s\n" $$tool; \
+		else \
+			printf "  $(RED)✖$(NC) %s (missing)\n" $$tool; \
+		fi; \
+	done
+
+# --- Per-service shortcuts (no STACK/service= typing) -------------------
+
+shell-web:    service=web-api          ; $(MAKE) --no-print-directory shell service=web-api
+shell-search: service=search-gateway   ; $(MAKE) --no-print-directory shell service=search-gateway
+shell-agent:  service=search-agent     ; $(MAKE) --no-print-directory shell service=search-agent
+shell-llm:    service=inference-gateway ; $(MAKE) --no-print-directory shell service=inference-gateway
+shell-vec:    service=vector-store     ; $(MAKE) --no-print-directory shell service=vector-store
+shell-wh:     service=knowledge-warehouse ; $(MAKE) --no-print-directory shell service=knowledge-warehouse
+shell-crawl:  service=crawler          ; $(MAKE) --no-print-directory shell service=crawler
+shell-db:     service=postgres         ; $(MAKE) --no-print-directory shell service=postgres
+shell-redis:  service=redis            ; $(MAKE) --no-print-directory shell service=redis
+
+logs-web:    service=web-api           ; $(MAKE) --no-print-directory logs service=web-api
+logs-search: service=search-gateway    ; $(MAKE) --no-print-directory logs service=search-gateway
+logs-agent:  service=search-agent      ; $(MAKE) --no-print-directory logs service=search-agent
+logs-llm:    service=inference-gateway ; $(MAKE) --no-print-directory logs service=inference-gateway
+logs-vec:    service=vector-store      ; $(MAKE) --no-print-directory logs service=vector-store
+logs-wh:     service=knowledge-warehouse ; $(MAKE) --no-print-directory logs service=knowledge-warehouse
+logs-crawl:  service=crawler           ; $(MAKE) --no-print-directory logs service=crawler
+logs-db:     service=postgres          ; $(MAKE) --no-print-directory logs service=postgres
+
+restart-web:    service=web-api          ; $(MAKE) --no-print-directory restart service=web-api
+restart-search: service=search-gateway   ; $(MAKE) --no-print-directory restart service=search-gateway
+restart-agent:  service=search-agent     ; $(MAKE) --no-print-directory restart service=search-agent
+restart-llm:    service=inference-gateway ; $(MAKE) --no-print-directory restart service=inference-gateway
+
+.PHONY: shell-web shell-search shell-agent shell-llm shell-vec shell-wh shell-crawl shell-db shell-redis
+.PHONY: logs-web logs-search logs-agent logs-llm logs-vec logs-wh logs-crawl logs-db
+.PHONY: restart-web restart-search restart-agent restart-llm
+.PHONY: tui tui-test tui-screenshot sdk-install sdk-test sdk-test-unit sdk-repl
+.PHONY: ping audit todo versions env-diff check-deps
+
+# --- Quick API curls (most common debug) -------------------------------
+
+curl-catalog:
+	@curl -sS http://localhost:8083/dss/api/providers | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{len(d[\"models\"])} models'); [print(f'  {m[\"id\"]:35} {m[\"provider\"]}') for m in d['models']]"
+
+curl-warehouse:
+	@curl -sS 'http://localhost:8083/dss/warehouse/stats' | python3 -m json.tool
+
+curl-warehouse-search:
+	@curl -sS 'http://localhost:8083/dss/warehouse/search?q=python&limit=5' | python3 -m json.tool
+
+curl-search-providers:
+	@curl -sS 'http://localhost:8083/dss/gateway/providers/registered' | python3 -m json.tool
+
+curl-llm:
+	@curl -sS -X POST http://localhost:8005/v1/chat/completions \
+		-H 'Content-Type: application/json' \
+		-d '{"model":"virtual/free-coder","messages":[{"role":"user","content":"Reply: OK"}],"stream":false}' \
+		| python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('content') or d.get('raw_response',{}).get('choices',[{}])[0].get('message',{}).get('content',''))"
+
+curl-vector:
+	@curl -sS -X POST http://localhost:8083/dss/vectors/query \
+		-H 'Content-Type: application/json' \
+		-d '{"namespace":"default","query":"test","top_k":3}' | python3 -m json.tool
+
+.PHONY: curl-catalog curl-warehouse curl-warehouse-search curl-search-providers curl-llm curl-vector
+
+# --- Database / volume shortcuts ---------------------------------------
+
+db-shell:                                       # psql into the warehouse DB
+	@$(COMPOSE) exec postgres psql -U dss_user -d warehouse
+
+db-stats:
+	@$(COMPOSE) exec postgres psql -U dss_user -d warehouse -c "\
+		SELECT 'warehouse' AS db, COUNT(*) AS rows FROM pages \
+		UNION ALL SELECT 'warehouse_fts', COUNT(*) FROM pages_fts;"
+
+db-backup:                                      # dump warehouse + vectors DB
+	@mkdir -p backups
+	@$(COMPOSE) exec -T postgres pg_dump -U dss_user warehouse > backups/warehouse-$$(date +%F-%H%M).sql
+	@echo -e "$(GREEN)✅ backups/warehouse-$$(date +%F-%H%M).sql$(NC)"
+
+redis-cli:                                      # redis CLI in the redis container
+	@$(COMPOSE) exec redis redis-cli
+
+.PHONY: db-shell db-stats db-backup redis-cli
+
+# --- Reset / wipe individual data stores (no volume unmount) ----------
+
+reset-vectors:                                  # wipe the vector store
+	@$(COMPOSE) exec vector-store sh -c 'rm -f /app/data/documents/* /app/data/index/* /app/data/chroma.sqlite3' 2>/dev/null || true
+	@$(COMPOSE) restart vector-store
+	@echo -e "$(GREEN)✅ vector store reset$(NC)"
+
+reset-warehouse:                                # truncate warehouse tables
+	@$(COMPOSE) exec postgres psql -U dss_user -d warehouse -c "TRUNCATE pages, pages_fts;"
+	@echo -e "$(GREEN)✅ warehouse truncated$(NC)"
+
+reset-cache:                                    # wipe crawler cache
+	@$(COMPOSE) exec crawler sh -c 'rm -rf /app/cache/*' 2>/dev/null || true
+	@echo -e "$(GREEN)✅ crawler cache wiped$(NC)"
+
+reset-hashes:                                   # clear web-api seen-hashes (forces re-embed)
+	@$(COMPOSE) exec web-api sh -c 'rm -f /app/data/hashes.json /app/data/hashes.json.bak' 2>/dev/null || true
+	@$(COMPOSE) restart web-api
+	@echo -e "$(GREEN)✅ web-api hashes cleared$(NC)"
+
+.PHONY: reset-vectors reset-warehouse reset-cache reset-hashes
+
+# --- Stack maintenance -------------------------------------------------
+
+reboot:                                         # full restart: down, up
+	@$(MAKE) --no-print-directory down
+	@$(MAKE) --no-print-directory up
+
+stats:                                          # docker stats scoped to this stack
+	@docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}" \
+		$(shell docker ps --filter "label=com.docker.compose.project=$(COMPOSE_PROJECT)" --format '{{.Names}}' 2>/dev/null) 2>/dev/null \
+		|| docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+
+clear-logs:                                     # truncate log files of running services
+	@echo -e "$(YELLOW)🧹 Truncating logs of running services$(NC)"; \
+	for s in $$($(COMPOSE) ps --services 2>/dev/null); do \
+		$(COMPOSE) exec -T $$s sh -c 'truncate -s 0 /proc/1/fd/1 2>/dev/null; true' >/dev/null 2>&1 || true; \
+	done; \
+	echo -e "$(GRAY)  (container logs go to json driver; use 'make logs-clear' to drop journal)$(NC)"
+
+errors:                                         # last 50 ERROR/Exception lines across the stack
+	@services=$$($(COMPOSE) ps --services 2>/dev/null || true); \
+	if [ -z "$$services" ]; then echo -e "$(GRAY)  (stack not running)$(NC)"; exit 0; fi; \
+	for s in $$services; do \
+		hits=$$($(COMPOSE) logs --no-color --tail=200 $$s 2>/dev/null | grep -E -i 'error|exception|traceback|failed' | tail -5 || true); \
+		if [ -n "$$hits" ]; then \
+			echo -e "  $(RED)● $$s$(NC)"; \
+			echo "$$hits" | sed 's/^/    /'; \
+		fi; \
+	done; \
+	echo -e "$(GRAY)  (only services with hits shown)$(NC)"; \
+	true
+
+git-status:                                     # short git status of the working tree
+	@git -C $(CURDIR) status --short
+	@echo "---"
+	@git -C $(CURDIR) log --oneline -5
+
+.PHONY: reboot stats clear-logs errors git-status
+
+# --- Misc dev workflows -----------------------------------------------
+
+e2e: sdk-test tui-test                         # full E2E: SDK + TUI against live stack
+	@echo -e "$(GREEN)✅ E2E suite passed$(NC)"
+
+snapshot:                                       # capture TUI screenshot + version info
+	@$(MAKE) --no-print-directory tui-screenshot
+	@$(MAKE) --no-print-directory versions | tee $(TUI_DIR)/snapshot.txt
+	@echo -e "$(GREEN)✅ snapshot saved$(NC)"
+
+.PHONY: e2e snapshot
