@@ -373,9 +373,94 @@
 ## NEXT STEPS (for the audit/viability-2026-06-05 branch)
 
 - [ ] Rotate `GEMINI_API_KEY` and `GROQ_API_KEY` at provider consoles
-- [ ] Apply T2 fix (Makefile default STACK)
-- [ ] Apply T3 fix (nginx proxy_pass)
-- [ ] Apply T4 fix (provider list)
-- [ ] Run live boot smoke test in containers per audit ask_cards answer
+- [x] Apply T2 fix (Makefile default STACK) — commit `2f5c512`
+- [x] Apply T3 fix (nginx proxy_pass) — commit `2f5c512`
+- [x] Apply T4 fix (provider list) — commit `2f5c512`
+- [x] Apply T4 follow-up (plumb env var through compose) — commit `49f4064`
+- [x] Run live boot smoke test in containers — see LIVE BOOT VALIDATION below
 - [ ] Containerized test pass: bring up `infra/docker-compose.yml`, curl-smoke `/health`, `/api/aggregate`, `/crawl`, `/embed`, `/query`
 - [ ] Re-audit after fixes; close this report
+
+---
+
+## LIVE BOOT VALIDATION (2026-06-05)
+
+Branch: `audit/viability-2026-06-05` at commit `49f4064`. Stack: `infra/docker-compose.yml` via `make up STACK=full`. All tests run with `DEEPSEEK_API_KEY` set, no other API keys. Substrate-core stack left running (untouched, separate project).
+
+### Boot outcome
+
+```
+make up STACK=full → exit 0. 14/14 containers up in ~6 seconds (after image cache).
+
+  dss-crawler              HEALTHY
+  dss-deepsearch           HEALTHY
+  dss-inference-gateway    HEALTHY
+  dss-knowledge-warehouse  HEALTHY
+  dss-nginx                UNHEALTHY  (57 failed healthchecks at time of report)
+  dss-postgres             HEALTHY
+  dss-redis                HEALTHY
+  dss-search-agent         HEALTHY
+  dss-search-gateway       RUNNING    (no healthcheck defined)
+  dss-searxng              RUNNING    (no healthcheck defined)
+  dss-vector-store         HEALTHY
+  dss-web-api              HEALTHY
+  dss-whoogle              HEALTHY
+  dss-yacy                 HEALTHY
+```
+
+### T2 — Makefile default STACK
+
+**VERDICT: FIXED AND VERIFIED.**
+- Before: `STACK ?= core` resolved to `infra/docker-compose.core.yml` (deleted in commit `d527f54`) → `make up` failed with `Stack 'core' not found`.
+- Fix: `STACK ?= full` (commit `2f5c512`).
+- Runtime: `make up STACK=full` returns exit 0. All 14 services up.
+
+### T3 — nginx proxy_pass
+
+**VERDICT: FIXED AND VERIFIED AT THE API LEVEL.**
+- Before: `proxy_pass http://web-api:8014/` stripped `/dss/api/` prefix and forwarded to `/`. `web-api` routes are under `/api/`, so `/dss/api/aggregate` → `/aggregate` → 404.
+- Fix: `proxy_pass http://web-api:8014/api/;` (commit `2f5c512`).
+- Runtime: `POST http://localhost:8083/dss/api/aggregate` returns **200** with real results. For query `quantum entanglement` (default 7 providers): 3 sources, 10.4s, domains = `['code', 'social_news', 'q_and_a']`.
+- **Small related finding (not in original T3):** `GET http://localhost:8083/dss/api/health` still 404s, because the `web-api` `/health` endpoint is at `/health` not `/api/health`. Fix is to add a location block for `/dss/health` that strips and forwards to web-api's `/health` (currently the static `return 200` block in nginx is the only thing serving `/dss/health`).
+
+### T4 — provider list configurable
+
+**VERDICT: FIXED AND VERIFIED END-TO-END (after second-order fix).**
+- Code change (commit `2f5c512`): replaced hardcoded `_AGGREGATE_PROVIDERS` with `_resolve_aggregate_providers()` that reads `AGGREGATE_PROVIDERS` env var.
+- **Second-order finding caught at runtime:** the env var wasn't being passed by compose. The `web-api` service in `infra/docker-compose.yml` didn't declare `AGGREGATE_PROVIDERS` in its `environment:` block, so `docker-compose --env-file .dev.env` interpolated the value but the container never received it. `docker exec dss-web-api sh -c 'echo $AGGREGATE_PROVIDERS'` returned empty.
+- Second-order fix (commit `49f4064`): added `AGGREGATE_PROVIDERS: ${AGGREGATE_PROVIDERS:-}` to the `web-api` environment block + documented in `.env.example`.
+- Runtime verification:
+  ```
+  AGGREGATE_PROVIDERS=searxng,wikipedia  → in-container env: AGGREGATE_PROVIDERS=searxng,wikipedia
+  → query 'quantum entanglement' → total_sources=5, domains_queried=['encyclopedia']
+    (5 results, all from wikipedia; searxng returned 0)
+
+  (no override)  → in-container env: AGGREGATE_PROVIDERS=[]
+  → query 'python tutorial' → total_sources=5, domains_queried=
+    ['code', 'encyclopedia', 'q_and_a', 'social_news', 'web']
+  ```
+
+### NEW FINDINGS from live boot
+
+- **N1: nginx healthcheck is broken** (false negative). `docker exec dss-nginx wget -qO- http://localhost:80/health` returns `wget: can't connect to remote host: Connection refused` (57+ consecutive failures). Yet external `curl http://localhost:8083/health` returns 200, and the nginx access log shows successful responses. The healthcheck inside the container can't reach `localhost:80` even though the port is bound and serving. Likely IPv6/IPv4 resolution mismatch in the `wget` invocation. Action: rewrite healthcheck to use `127.0.0.1` explicitly, or check the process is up via `pgrep`.
+
+- **N2: `search-gateway` and `searxng` have no healthcheck defined.** The compose files don't include `healthcheck:` blocks for these services. `make status` reports them as `RUNNING` (yellow) but never as `HEALTHY` (green). For a 14-service stack that the README calls "production-grade", every long-running service should have a healthcheck.
+
+- **N3: whoogle is "healthy" but functionally broken** (corroborates the static audit's HIGH on Whoogle). The healthcheck just confirms the container is up; it does not test that Whoogle returns real results. Per `settings.yml:46`, Whoogle is blocked by Google when run via Tor exits. Confirmed at runtime: the 7-provider aggregate never returns a `whoogle`-sourced result.
+
+- **N4: search-gateway reports all 13 providers as `"enabled"`** — but this is a static string literal, not a real health check. `GET /providers` returns `{"whoogle":"enabled",...,"reddit":"enabled",...}`. At least reddit, whoogle, and duckduckgo (Instant Answer API) are functionally dead. The endpoint name `/providers` is misleading — it should be `/providers/registered` or `/providers/configured`.
+
+- **N5: aggregate latency is high.** 10.2–10.4s for a 3-result query, on a "test query" with simple terms. The 12s deadline in `_multi_provider_search` is hit for slow queries. With 7 providers, the gateway fans out in parallel but waits for the slowest to time out. `execution_time_ms=10434` is too close to the 12000ms deadline. Either: (a) per-provider timeouts instead of global, (b) shorter timeout with partial-result acceptance, (c) make the deadline configurable.
+
+- **N6: `_save_hashes` still never called** (CRITICAL from static audit, not fixed in this commit). After ~6 web-api restarts during testing, every embed operation would re-embed identical content. Verified in code: `grep -rn "_save_hashes" services/web-api/main.py` shows the function defined but no callers.
+
+### What was NOT covered by this live boot
+
+- `crawl` endpoint not exercised.
+- `vector-store /embed` and `/query` not exercised (only `/health`).
+- `search-agent /synthesize/stream` not exercised (requires a non-empty result set + working inference-gateway LLM call).
+- `proxy-rotator` (with-proxy profile not enabled).
+- `wiki-indexer` (its compose env is misconfigured per the audit; was not started).
+- `deepsearch` (deprecated shim; started but not exercised).
+
+
