@@ -88,9 +88,18 @@ log = logging.getLogger("crawler")
 app = FastAPI(title="DeepSearch Crawler v2", version="2.0.0")
 
 # ─── Cache ────────────────────────────────────────────────
+def _connect_db(path: Path):
+    """Open a SQLite connection with WAL + safe defaults. Used for both cache.db and pending_forwards.db."""
+    conn = sqlite3.connect(str(path), timeout=5, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
 def _init_cache():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(str(CACHE_DB)) as conn:
+    with _connect_db(CACHE_DB) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS cache (
                 url_hash TEXT PRIMARY KEY,
@@ -123,7 +132,7 @@ def _cache_key(url: str) -> str:
 
 def _cache_get(url: str, ttl: int = DEFAULT_TTL_SECONDS) -> Optional[dict]:
     key = _cache_key(url)
-    with sqlite3.connect(str(CACHE_DB)) as conn:
+    with _connect_db(CACHE_DB) as conn:
         row = conn.execute(
             "SELECT * FROM cache WHERE url_hash = ? AND crawled_at > ?",
             (key, time.time() - ttl),
@@ -136,7 +145,7 @@ def _cache_get(url: str, ttl: int = DEFAULT_TTL_SECONDS) -> Optional[dict]:
 def _cache_put(url: str, data: dict):
     key = _cache_key(url)
     domain = data.get("source_domain", "")
-    with sqlite3.connect(str(CACHE_DB)) as conn:
+    with _connect_db(CACHE_DB) as conn:
         conn.execute("""
             INSERT OR REPLACE INTO cache
             (url_hash, url, content, markdown, title, author, published,
@@ -156,7 +165,7 @@ def _cache_put(url: str, data: dict):
         conn.commit()
 
 def _cache_stats() -> dict:
-    with sqlite3.connect(str(CACHE_DB)) as conn:
+    with _connect_db(CACHE_DB) as conn:
         total = conn.execute("SELECT COUNT(*) FROM cache").fetchone()[0]
         fresh = conn.execute(
             "SELECT COUNT(*) FROM cache WHERE crawled_at > ?",
@@ -173,7 +182,7 @@ def _cache_stats() -> dict:
 _PENDING_FORWARD_DB = CACHE_DIR / "pending_forwards.db"
 
 def _init_pending_forwards():
-    with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+    with _connect_db(_PENDING_FORWARD_DB) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS pending_forwards (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -212,7 +221,7 @@ async def _forward_to_warehouse(**payload) -> bool:
 
 def _store_pending_forward(**payload):
     """Store failed forward in persistent queue for background retry."""
-    with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+    with _connect_db(_PENDING_FORWARD_DB) as conn:
         conn.execute("""
             INSERT INTO pending_forwards (url, markdown, content, title, source_domain, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -227,7 +236,7 @@ async def _retry_pending_forwards():
     """Background task: retry pending warehouse forwards every 60s."""
     while True:
         await asyncio.sleep(60)
-        with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+        with _connect_db(_PENDING_FORWARD_DB) as conn:
             rows = conn.execute(
                 "SELECT * FROM pending_forwards WHERE attempts < 10 ORDER BY id LIMIT 20"
             ).fetchall()
@@ -242,7 +251,7 @@ async def _retry_pending_forwards():
                 word_count=len(d["markdown"].split()) if d["markdown"] else 0,
                 language="en", author="", published="",
             )
-            with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+            with _connect_db(_PENDING_FORWARD_DB) as conn:
                 if success:
                     conn.execute("DELETE FROM pending_forwards WHERE id = ?", (d["id"],))
                     log.info("pending_forward_ok id=%d url=%s", d["id"], d["url"][:120])
@@ -516,7 +525,7 @@ async def cache_stats():
 
 @app.post("/cache/clear")
 async def cache_clear():
-    with sqlite3.connect(str(CACHE_DB)) as conn:
+    with _connect_db(CACHE_DB) as conn:
         conn.execute("DELETE FROM cache")
         conn.commit()
     return {"cleared": True}
@@ -524,7 +533,7 @@ async def cache_clear():
 @app.get("/health")
 async def health():
     # Count pending forwards
-    with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+    with _connect_db(_PENDING_FORWARD_DB) as conn:
         pending = conn.execute("SELECT COUNT(*) FROM pending_forwards").fetchone()[0]
     return {
         "status": "healthy" if _crawler else "degraded",
@@ -553,7 +562,7 @@ async def root():
 @app.get("/crawl/pending")
 async def pending_forwards():
     """List pending warehouse forwards."""
-    with sqlite3.connect(str(_PENDING_FORWARD_DB)) as conn:
+    with _connect_db(_PENDING_FORWARD_DB) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT id, url, title, attempts, last_attempt, created_at FROM pending_forwards ORDER BY id LIMIT 100"

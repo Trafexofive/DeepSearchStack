@@ -194,6 +194,8 @@ services:
       - CRAWLER_CONCURRENCY=10
       - HTTP_PROXY=${CRAWLER_HTTP_PROXY:-}
       - HTTPS_PROXY=${CRAWLER_HTTPS_PROXY:-}
+    volumes:
+      - crawler_cache:/app/cache
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
@@ -265,6 +267,9 @@ services:
       - VECTOR_STORE_URL=http://vector-store:8004
       - REDIS_URL=redis://redis:6379/0
       - AGGREGATE_PROVIDERS=${AGGREGATE_PROVIDERS:-}
+      - HASH_DB_PATH=/app/data/embed_hashes.json
+    volumes:
+      - web_api_data:/app/data
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8014/health')"]
       interval: 15s

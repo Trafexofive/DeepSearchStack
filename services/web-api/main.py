@@ -295,6 +295,36 @@ async def startup():
     _load_hashes()
     _load_facts()
     log.info("startup_complete hashes=%d facts=%d", len(_embed_hashes), len(_fact_db))
+    # PERSISTENCE: periodic flush of embed-hash dedup set to disk so restarts
+    # don't trigger full re-embed of all content. Saves every 60s; also on shutdown.
+    asyncio.create_task(_periodic_save_hashes())
+
+
+async def _periodic_save_hashes():
+    """Save _embed_hashes to disk every 60s. Cancel-safe."""
+    try:
+        while True:
+            await asyncio.sleep(60)
+            try:
+                _save_hashes()
+            except Exception as e:
+                log.warning("periodic_save_hashes_failed: %s", e)
+    except asyncio.CancelledError:
+        try:
+            _save_hashes()
+        except Exception:
+            pass
+        raise
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Final save of embed-hash dedup set on shutdown."""
+    try:
+        _save_hashes()
+        log.info("shutdown_saved_hashes count=%d", len(_embed_hashes))
+    except Exception as e:
+        log.warning("shutdown_save_hashes_failed: %s", e)
 
 
 # ─── Helpers ───────────────────────────────────────────────

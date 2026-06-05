@@ -66,8 +66,13 @@ class SynthesizerAgent:
             ):
                 yield chunk
         except Exception as e:
-            logger.error(f"A critical error occurred during synthesis stream: {e}")
-            error_content = "\n\n**Error during synthesis:** An issue occurred while generating the answer."
+            logger.exception("A critical error occurred during synthesis stream")
+            error_type = type(e).__name__
+            error_summary = str(e)[:200] if str(e) else "(no message)"
+            error_content = (
+                f"\n\n**Error during synthesis:** `{error_type}: {error_summary}`.\n"
+                f"Check the search-agent container logs for the full traceback."
+            )
             error_chunk = StreamingChunk(
                 content=error_content, finished=True, sources=request.sources
             )
