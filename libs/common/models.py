@@ -66,6 +66,7 @@ class SynthesizeRequest(BaseModel):
     query: str
     sources: List[SearchResult]
     llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
 

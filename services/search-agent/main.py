@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import List
 
@@ -19,6 +20,48 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("synthesizer_agent")
+
+
+# Pattern for [N] citation marks. Matches digit-only bracketed numbers.
+_CITATION_RE = re.compile(r"\[(\d+)\]")
+
+
+def validate_citations(content: str, num_sources: int) -> dict:
+    """Parse [N] citations from LLM output and detect out-of-range ones.
+
+    LLMs occasionally hallucinate citations — e.g., citing [7] when only
+    5 sources were provided, or citing [0]. This is a known failure mode
+    that makes the synthesis look authoritative but is in fact wrong.
+
+    Returns:
+      {
+        "total":       int  # total [N] tokens found
+        "valid":       list[int]  # in-range citation numbers (1..num_sources), in order
+        "invalid":     list[int]  # out-of-range citation numbers, deduped, in first-seen order
+        "invalid_strs": list[str]  # the literal [N] strings the user saw, deduped
+      }
+    """
+    found = _CITATION_RE.findall(content)
+    total = len(found)
+    valid: list[int] = []
+    invalid: list[int] = []
+    invalid_strs: list[str] = []
+    seen_invalid: set[int] = set()
+    for s in found:
+        n = int(s)
+        if 1 <= n <= num_sources:
+            valid.append(n)
+        else:
+            if n not in seen_invalid:
+                seen_invalid.add(n)
+                invalid.append(n)
+                invalid_strs.append(f"[{n}]")
+    return {
+        "total": total,
+        "valid": valid,
+        "invalid": invalid,
+        "invalid_strs": invalid_strs,
+    }
 
 
 class SynthesizerAgent:
@@ -45,21 +88,58 @@ class SynthesizerAgent:
             ),
         ]
 
+        # Resolve which model name to send to the gateway.
+        # `llm_model` is the preferred field — it's where 'virtual/free-coder'
+        # (the cascade) lives. Fall back to `llm_provider` (legacy), then
+        # to the cascade default. The previous code sent `llm_provider`
+        # directly, which bypassed the cascade entirely and hit deepseek
+        # (out of credits) → 402 → "peer closed connection".
+        synthesis_model = (
+            request.llm_model
+            or request.llm_provider
+            or "virtual/free-coder"
+        )
+
         content_streamed = False
+        accumulated: list[str] = []
         async for chunk in self.llm_client.get_streaming_completion(
-            messages, provider=synthesis_provider
+            messages, provider=synthesis_model
         ):
             content_streamed = True
+            accumulated.append(chunk)
             yield f"data: {json.dumps(StreamingChunk(content=chunk, finished=False).dict())}\n\n"
 
         if not content_streamed:
             raise ValueError("LLM provider returned an empty stream.")
 
+        # Citation validation: detect hallucinated [N] marks the LLM
+        # output that don't refer to a real source. LLMs occasionally
+        # invent citations; this surfaces them to the user.
+        full_content = "".join(accumulated)
+        report = validate_citations(full_content, len(request.sources))
+        if report["invalid"]:
+            logger.warning(
+                "Citation validation: %d invalid of %d total — %s",
+                len(report["invalid"]),
+                report["total"],
+                report["invalid_strs"],
+            )
+            warning_text = (
+                f"\n\n_Note: {len(report['invalid'])} citation(s) in this "
+                f"response do not refer to a provided source "
+                f"({', '.join(report['invalid_strs'])}). The LLM may have "
+                f"hallucinated these. Only the numbered sources in the list "
+                f"below are real._"
+            )
+            yield f"data: {json.dumps(StreamingChunk(content=warning_text, finished=False).dict())}\n\n"
+
         yield f'data: {json.dumps(StreamingChunk(content="", finished=True, sources=request.sources).dict())}\n\n'
 
     async def _generate_and_handle_stream(self, request: SynthesizeRequest):
         """A single, robust generator that handles the entire process, including errors."""
-        synthesis_provider = request.llm_provider or "deepseek-chat"
+        # synthesis_provider is kept for log/error messages; the actual
+        # model resolution happens inside _yield_synthesis_chunks.
+        synthesis_provider = request.llm_provider or "virtual/free-coder"
         try:
             async for chunk in self._yield_synthesis_chunks(
                 request, synthesis_provider
