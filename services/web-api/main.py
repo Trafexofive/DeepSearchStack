@@ -299,11 +299,14 @@ async def startup():
 
 # ─── Helpers ───────────────────────────────────────────────
 
-# Provider list - 7 verified-working, non-redundant providers across 7 domains.
-# Redundant providers removed: whoogle/duckduckgo (SearXNG covers Google+Bing+DDG),
+# Provider list - default 7 verified-working, non-redundant providers across 7 domains.
+# Redundant providers removed from default: whoogle/duckduckgo (SearXNG covers Google+Bing+DDG),
 #   pubmed/crossref/internetarchive (lower priority, keep domain count lean).
 # IP-blocked from Docker: reddit (needs proxy).
-_AGGREGATE_PROVIDERS = [
+#
+# Override via env var AGGREGATE_PROVIDERS (comma-separated), e.g.:
+#   AGGREGATE_PROVIDERS=searxng,wikipedia,github,arxiv
+_DEFAULT_AGGREGATE_PROVIDERS = [
     "searxng",         # web (multi-engine: Google, Bing, DDG, etc.)
     "wikipedia",       # encyclopedia
     "stackexchange",    # q_and_a
@@ -312,6 +315,16 @@ _AGGREGATE_PROVIDERS = [
     "arxiv",            # academic
     "yacy",             # web (P2P, complementary results)
 ]
+
+def _resolve_aggregate_providers() -> List[str]:
+    """Resolve provider list from AGGREGATE_PROVIDERS env var, falling back to defaults."""
+    override = os.environ.get("AGGREGATE_PROVIDERS", "").strip()
+    if not override:
+        return list(_DEFAULT_AGGREGATE_PROVIDERS)
+    providers = [p.strip() for p in override.split(",") if p.strip()]
+    return providers or list(_DEFAULT_AGGREGATE_PROVIDERS)
+
+_AGGREGATE_PROVIDERS = _resolve_aggregate_providers()
 
 async def _multi_provider_search(query: str, max_results: int) -> List[dict]:
     """Query ALL search providers via search-gateway with deadline."""

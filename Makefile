@@ -25,7 +25,7 @@ ENV_TEMPLATE := infra/env/.env.template
 -include $(ENV_FILE)
 PROJECT_NAME ?= deepsearch-stack
 
-STACK ?= core
+STACK ?= full
 COMPOSE_DIR := infra
 NETWORK_NAME := deepsearch_net
 
