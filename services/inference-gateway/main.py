@@ -43,9 +43,7 @@ def _init_providers() -> dict:
         # Add more providers here as they're implemented:
         # ("openrouter",  OpenRouterProvider,  "OPENROUTER_API_KEY"),
         # ("nvidia",      NvidiaProvider,      "NVIDIA_API_KEY"),
-        # ("groq",        GroqProvider,        "GROQ_API_KEY"),
         # ("cerebras",    CerebrasProvider,    "CEREBRAS_API_KEY"),
-        # ("gemini",      GeminiProvider,      "GEMINI_API_KEY"),
         # ("github",      GitHubProvider,      "GITHUB_TOKEN"),
         # ("siliconflow", SiliconFlowProvider, "SILICONFLOW_API_KEY"),
         # ("sambanova",   SambaNovaProvider,   "SAMBA_NOVA_API_KEY"),
@@ -101,6 +99,7 @@ async def discover_models():
         "opencode": [
             ModelInfo(id="deepseek-v4-flash-free", provider="opencode", owned_by="deepseek-ai", context_length=200000),
             ModelInfo(id="nemotron-3-super-free", provider="opencode", owned_by="nvidia", context_length=128000),
+            ModelInfo(id="minimax-m3-free", provider="opencode", owned_by="minimax", context_length=200000),
         ],
         "nvidia_nim": [
             ModelInfo(id="zhipuai/glm-4-9b-chat", provider="nvidia_nim", owned_by="zhipu-ai", context_length=131072),
@@ -141,15 +140,37 @@ VIRTUAL_MODELS: dict[str, list[dict]] = {
     "virtual/reasoning": [
         {"provider": "deepseek", "model": "deepseek-reasoner"},
     ],
-    # Free-tier cascading fallback — tries OpenCode first (free), then DeepSeek (paid)
+    # Free-tier cascading fallback — tries each opencode free model in
+    # order, falls through to paid deepseek if all fail. The order is
+    # preference: fast (deepseek-v4-flash-free) first, then heavier
+    # reasoning models, then the long-tail alternatives.
     "virtual/free-coder": [
         {"provider": "opencode", "model": "deepseek-v4-flash-free"},
+        {"provider": "opencode", "model": "nemotron-3-super-free"},
+        {"provider": "opencode", "model": "minimax-m3-free"},
+        {"provider": "opencode", "model": "mimo-v2.5-free"},
+        {"provider": "opencode", "model": "qwen3.6-plus-free"},
         {"provider": "deepseek",  "model": "deepseek-chat"},
+    ],
+    # Same chain but with the cheaper, faster models preferred for
+    # short-form work (titles, summaries, snippets).
+    "virtual/free-fast": [
+        {"provider": "opencode", "model": "deepseek-v4-flash-free"},
+        {"provider": "opencode", "model": "mimo-v2.5-free"},
+        {"provider": "opencode", "model": "qwen3.6-plus-free"},
+        {"provider": "deepseek",  "model": "deepseek-chat"},
+    ],
+    # Same chain but the reasoning-capable models first (for blog
+    # generation, audits, anything that needs depth).
+    "virtual/free-reasoning": [
+        {"provider": "opencode", "model": "nemotron-3-super-free"},
+        {"provider": "opencode", "model": "minimax-m3-free"},
+        {"provider": "opencode", "model": "deepseek-v4-flash-free"},
+        {"provider": "deepseek",  "model": "deepseek-reasoner"},
     ],
     # Extend with multi-provider fallback chains:
     # "virtual/coder-heavy": [
     #     {"provider": "deepseek", "model": "deepseek-chat"},
-    #     {"provider": "groq",    "model": "deepseek-r1-distill-llama-70b"},
     # ],
 }
 
