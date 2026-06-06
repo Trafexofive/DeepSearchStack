@@ -567,6 +567,105 @@ bash stress_test.sh                       # Shell-based stress test
 
 ---
 
+## TUI (Textual)
+
+Interactive terminal UI for the full pipeline. 8 tabs, real streaming, mouse-friendly.
+
+```bash
+make tui          # launch in container (recommended)
+make tui-local    # launch from host (no container)
+```
+
+Keyboard:
+
+| Key | Action |
+|---|---|
+| `?` | Help |
+| `Tab` / `Shift+Tab` | Next/prev tab |
+| `Ctrl+C` | Quit |
+| `Ctrl+L` | Clear output |
+| `Ctrl+S` | Save config |
+| `Esc` | Cancel in-flight |
+
+Tabs: **Search** (multi-provider + streaming synthesis), **Synthesize** (paste sources), **LLM** (direct completion, with model picker), **Crawl** (single URL), **Embed** (embed + vector query), **Warehouse** (knowledge store), **Settings** (edit + save config), **Help**.
+
+Settings persist to `~/.config/deepsearch/tui.toml`. History persists to `~/.local/share/deepsearch/history.sqlite3`. Both volumes are mounted in the container (`tui_config`, `tui_history`).
+
+## Tests
+
+| Target | What it tests | Pass status |
+|---|---|---|
+| `make sdk-test-unit` | SDK unit tests (no stack needed): citation validation, llm_base_url inference | 8/8 |
+| `make sdk-test` | Full SDK: unit + 9 integration tests against live stack | 17/17 |
+| `make tui-test` | TUI smoke test (headless via textual's Pilot): mount, 8 tabs, switchable, help markdown, search synthesis | 5/5 |
+| `make persistence-test` | E2E: data survives `down` + `up`. Verifies PERS-2 fix (embed-hash dedup persists + dedup works post-restart) | 16/16 |
+| `make e2e` | `sdk-test` + `tui-test` (the full E2E suite) | green |
+| `make ping` | 8/8 services responding via nginx | green |
+| `make errors` | Recent ERROR/Exception lines across the stack | diagnostic |
+| `make versions` | Docker / compose / Python versions + every service's image tag | diagnostic |
+
+CI-friendly (no TTY required for the tests; `tui-test` uses textual's Pilot).
+
+## Makefile — DSS QOL targets
+
+The Makefile stays repo-agnostic above; the bottom adds DSS-specific quality-of-life:
+
+```bash
+# SDK + TUI
+make tui                   # launch TUI (containerized)
+make tui-local             # launch TUI from host
+make tui-test              # TUI smoke test (headless)
+make tui-screenshot        # save TUI screenshot to SVG
+make sdk-install           # pip install SDK + TUI deps
+make sdk-test              # full SDK test suite
+make sdk-test-unit         # SDK unit tests only
+make sdk-repl              # Python REPL with SDK preloaded
+
+# Quick checks
+make ping                  # HTTP health on every service (via nginx)
+make errors                # recent errors across the stack
+make audit / make todo     # grep headlines from docs/audit + docs/TODO
+
+# Per-service shortcuts
+make shell-web             # shell in web-api container
+make logs-llm              # follow inference-gateway logs
+make restart-search        # restart search-gateway
+
+# Quick API curls
+make curl-catalog          # 18 models in the inference catalog
+make curl-warehouse        # /dss/warehouse/stats
+make curl-llm              # one-shot LLM call
+
+# Database / volume
+make db-shell              # psql into the warehouse DB
+make db-stats              # row counts
+make db-backup             # pg_dump to backups/
+make redis-cli             # redis CLI in the redis container
+
+# Reset (no volume loss)
+make reset-vectors         # wipe vector store
+make reset-warehouse       # TRUNCATE pages
+make reset-cache           # wipe crawler cache
+make reset-hashes          # clear web-api seen-hashes
+
+# Maintenance
+make reboot                # down + up
+make stats                 # docker stats scoped to this stack
+make snapshot              # TUI screenshot + versions (for bug reports)
+```
+
+## Recent fixes (audit branch)
+
+This branch (`audit/viability-2026-06-05`) ships 24 commits including:
+
+- 12 CRITICAL / 30 HIGH / 31 MEDIUM audit findings resolved (`docs/audit/viability-2026-06-05.md`)
+- SDK v2 with full TUI coverage (`sdk/python/deepsearch.py`, 17/17 tests pass)
+- Textual TUI shell with 8 tabs (`sdk/python/tui/app.py`, 5/5 smoke pass)
+- Persistence E2E test that catches the user's #1 priority (`make persistence-test`, 16/16 pass)
+- 2 real bugs caught + fixed: search-gateway arxiv UnboundLocalError, searxng DNS traceback (engine proxy)
+- Crawler cache_get real bug (cache_hit was always False due to wrong column index)
+- 21 new QOL Makefile targets at the bottom
+
 ## License
 
 MIT
