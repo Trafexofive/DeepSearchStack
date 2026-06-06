@@ -30,6 +30,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import (
+    Button,
     Footer,
     Header,
     Input,
@@ -38,6 +39,7 @@ from textual.widgets import (
     ListView,
     Log,
     Markdown,
+    Select,
     Static,
     TabbedContent,
     TabPane,
@@ -51,6 +53,11 @@ from deepsearch import (
     SynthesizedChunk,
     validate_citations,
 )
+
+# TUI infrastructure (history + config persistence)
+from config import CONFIG_PATH, TUIConfig, load_or_default
+from history import DB_PATH as HISTORY_DB_PATH
+from history import HistoryDB
 
 
 # ─── Tabs ──────────────────────────────────────────────────────────────
@@ -96,10 +103,20 @@ class SearchTab(Container):
         with Horizontal(classes="search-row"):
             yield Input(placeholder="What do you want to search?", id="query-input", classes="search-input")
             yield Static(" Search ", id="search-btn", classes="search-btn")
+            yield Button("Save synth", id="search-save-synth", variant="default")
+            yield Button("Save sources", id="search-save-srcs", variant="default")
         with Horizontal(classes="results-area"):
             yield ListView(id="providers-list", classes="providers-list")
             yield Log(id="synthesis-view", classes="synthesis-view")
         yield Log(id="sources-view", classes="sources-view")
+
+    @on(Button.Pressed, "#search-save-synth")
+    def save_synth(self) -> None:
+        _save_log_to_file(self.query_one("#synthesis-view", Log), prefix="synth", parent=self)
+
+    @on(Button.Pressed, "#search-save-srcs")
+    def save_srcs(self) -> None:
+        _save_log_to_file(self.query_one("#sources-view", Log), prefix="sources", parent=self)
 
     def on_mount(self) -> None:
         providers = self.app.default_providers
@@ -162,6 +179,13 @@ class SearchTab(Container):
                 self.app.last_citation_report = report
                 elapsed = time.time() - start
                 self.app.status_message = f"{len(res.hits)} hits, {elapsed:.1f}s, {len(report['valid'])} valid citations"
+                if self.app.history:
+                    self.app.history.add(
+                        "search", query,
+                        result_summary=f"{len(res.hits)} hits, {len(report['valid'])} valid cites",
+                        elapsed_ms=int(elapsed * 1000),
+                        model=self.app.default_model,
+                    )
         except Exception as e:
             synth.write_line(f"[red]error: {type(e).__name__}: {e}[/red]")
 
@@ -241,15 +265,67 @@ class LLMTab(Container):
         height: auto;
         padding: 1;
     }
+    .llm-toolbar {
+        height: 3;
+        padding: 0 1;
+    }
+    .llm-toolbar Select {
+        width: 1fr;
+    }
+    .llm-toolbar Button {
+        width: 14;
+    }
     """
 
     def compose(self) -> ComposeResult:
+        with Horizontal(classes="llm-toolbar"):
+            # Model picker — populated in on_mount via list_models()
+            yield Select([(self.app.default_model, self.app.default_model)],
+                         id="llm-model", allow_blank=False, value=self.app.default_model)
+            yield Button("Refresh", id="llm-refresh", variant="primary")
+            yield Button("Save output", id="llm-save", variant="default")
         with Vertical(classes="llm-row"):
             yield Label("System prompt:")
             yield TextArea(id="llm-system", text="You are a helpful assistant.")
             yield Label("User message:")
             yield Input(placeholder="Hello", id="llm-user", classes="llm-input")
         yield Log(id="llm-output")
+
+    def on_mount(self) -> None:
+        # Populate the model picker in the background
+        self.run_worker(self._populate_models, exclusive=True)
+
+    async def _populate_models(self) -> None:
+        try:
+            async with AsyncDeepSearchClient(self.app.base_url) as client:
+                models, err = await client.list_models()
+            sel = self.query_one("#llm-model", Select)
+            if err or not models:
+                return
+            options = [(m.id, m.id) for m in models]
+            sel.set_options(options)
+            # Keep current value if still present
+            if self.app.default_model in [o[0] for o in options]:
+                sel.value = self.app.default_model
+        except Exception:
+            pass
+
+    @on(Select.Changed, "#llm-model")
+    def model_changed(self, event: Select.Changed) -> None:
+        # Update app-level default so subsequent LLM calls use it
+        self.app.default_model = str(event.value)
+        self.app._config.default_model = str(event.value)
+        self.app.status_message = f"model → {event.value}"
+
+    @on(Button.Pressed, "#llm-refresh")
+    def refresh_models(self) -> None:
+        self.run_worker(self._populate_models, exclusive=True)
+        self.app.status_message = "refreshing model list..."
+
+    @on(Button.Pressed, "#llm-save")
+    def save_output(self) -> None:
+        out = self.query_one("#llm-output", Log)
+        _save_log_to_file(out, prefix="llm", parent=self)
 
     @on(Input.Submitted, "#llm-user")
     async def submit(self, event: Input.Submitted) -> None:
@@ -260,18 +336,26 @@ class LLMTab(Container):
         out.clear()
         out.write_line(f"[bold]Streaming:[/bold]\n")
         system = self.query_one("#llm-system", TextArea).text
+        model = self.query_one("#llm-model", Select).value or self.app.default_model
+        start = time.time()
         try:
             async with AsyncDeepSearchClient(self.app.base_url) as client:
-                start = time.time()
                 n_chunks = 0
                 async for ch in client.llm_stream(
                     [{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
-                    model=self.app.default_model,
+                    model=model,
                 ):
                     n_chunks += 1
                     out.write(ch)
                 elapsed = time.time() - start
                 out.write_line(f"\n\n[dim]{n_chunks} chunks in {elapsed:.2f}s[/dim]")
+            if self.app.history:
+                self.app.history.add(
+                    "llm", user_msg,
+                    result_summary=f"{n_chunks} chunks",
+                    elapsed_ms=int((time.time() - start) * 1000),
+                    model=model,
+                )
         except Exception as e:
             out.write_line(f"[red]error: {type(e).__name__}: {e}[/red]")
 
@@ -424,25 +508,88 @@ class WarehouseTab(Container):
 
 
 class SettingsTab(Container):
-    """Settings tab: show current config (read-only for now)."""
+    """Settings tab: edit config + save to ~/.config/deepsearch/tui.toml."""
 
     DEFAULT_CSS = """
     SettingsTab {
         padding: 1;
+        layout: vertical;
+    }
+    SettingsTab Label.field {
+        padding-top: 1;
+        color: $accent;
+    }
+    SettingsTab Input {
+        margin-bottom: 1;
+    }
+    SettingsTab #cfg-status {
+        padding: 1;
+        color: $success;
     }
     """
 
     def compose(self) -> ComposeResult:
-        yield Static("Current settings (read-only):", classes="header")
+        yield Static("Settings (edit + save to ~/.config/deepsearch/tui.toml)", classes="header")
         yield Static("")
-        yield Static(f"Base URL:  {self.app.base_url}")
-        yield Static(f"LLM URL:   {self.app.llm_base_url}")
-        yield Static(f"Model:     {self.app.default_model}")
-        yield Static(f"Providers: {', '.join(self.app.default_providers)}")
-        yield Static("")
-        yield Static("Set via env vars: DEEPSEEK_BASE_URL, DEEPSEEK_LLM_URL, DEEPSEAK_MODEL, AGGREGATE_PROVIDERS")
-        yield Static("")
-        yield Static("Settings file: ~/.config/deepsearch/tui.toml (TODO 5.5.9)")
+        yield Label("Base URL", classes="field")
+        yield Input(value=self.app.base_url, id="cfg-base-url")
+        yield Label("LLM Base URL (blank = infer from base)", classes="field")
+        yield Input(value=self.app.llm_base_url or "", id="cfg-llm-url", placeholder="(inferred)")
+        yield Label("Default model", classes="field")
+        yield Input(value=self.app.default_model, id="cfg-model")
+        yield Label("Providers (comma-separated)", classes="field")
+        yield Input(value=", ".join(self.app.default_providers), id="cfg-providers")
+        yield Label("History limit", classes="field")
+        yield Input(value=str(self.app._config.history_limit), id="cfg-history-limit")
+        with Horizontal():
+            yield Button("Save", id="cfg-save", variant="primary")
+            yield Button("Reload", id="cfg-reload", variant="default")
+            yield Button("Clear history", id="cfg-clear-history", variant="warning")
+        yield Static("", id="cfg-status")
+        yield Static(f"Config file: {CONFIG_PATH}", id="cfg-file")
+        yield Static(f"History DB:  {HISTORY_DB_PATH}", id="cfg-db")
+
+    @on(Button.Pressed, "#cfg-save")
+    def save(self) -> None:
+        cfg = self.app._config
+        cfg.base_url = self.query_one("#cfg-base-url", Input).value.strip() or cfg.base_url
+        cfg.llm_base_url = (self.query_one("#cfg-llm-url", Input).value.strip() or None)
+        cfg.default_model = self.query_one("#cfg-model", Input).value.strip() or cfg.default_model
+        provs = self.query_one("#cfg-providers", Input).value
+        cfg.default_providers = [p.strip() for p in provs.split(",") if p.strip()]
+        try:
+            cfg.history_limit = int(self.query_one("#cfg-history-limit", Input).value.strip() or "200")
+        except ValueError:
+            cfg.history_limit = 200
+        try:
+            cfg.save()
+            # Apply live
+            self.app.base_url = cfg.base_url
+            self.app.llm_base_url = cfg.resolved_llm_base_url()
+            self.app.default_model = cfg.default_model
+            self.app.default_providers = list(cfg.default_providers)
+            self.query_one("#cfg-status", Static).update(f"saved {len(cfg.default_providers)} providers, model={cfg.default_model}")
+            self.app.status_message = f"config saved → {CONFIG_PATH}"
+        except Exception as e:
+            self.query_one("#cfg-status", Static).update(f"save failed: {e}")
+
+    @on(Button.Pressed, "#cfg-reload")
+    def reload(self) -> None:
+        cfg = TUIConfig.load()
+        self.query_one("#cfg-base-url", Input).value = cfg.base_url
+        self.query_one("#cfg-llm-url", Input).value = cfg.llm_base_url or ""
+        self.query_one("#cfg-model", Input).value = cfg.default_model
+        self.query_one("#cfg-providers", Input).value = ", ".join(cfg.default_providers)
+        self.query_one("#cfg-history-limit", Input).value = str(cfg.history_limit)
+        self.query_one("#cfg-status", Static).update("reloaded from disk")
+
+    @on(Button.Pressed, "#cfg-clear-history")
+    def clear_history(self) -> None:
+        if self.app.history:
+            n = self.app.history.clear()
+            self.query_one("#cfg-status", Static).update(f"cleared {n} history events")
+        else:
+            self.query_one("#cfg-status", Static).update("history disabled")
 
 
 class HelpTab(Container):
@@ -523,25 +670,44 @@ class DeepSearchTUI(App):
         Binding("ctrl+l", "clear_output", "Clear", show=True),
         Binding("question_mark", "show_help", "Help", show=True),
         Binding("escape", "cancel", "Cancel", show=False),
+        Binding("ctrl+s", "save_config", "Save cfg", show=True),
     ]
 
     status_message: reactive[str] = reactive("ready")
 
     def __init__(
         self,
-        base_url: str = "http://localhost:8083",
+        base_url: Optional[str] = None,
         llm_base_url: Optional[str] = None,
-        default_model: str = "virtual/free-coder",
+        default_model: Optional[str] = None,
         default_providers: Optional[list] = None,
+        config: Optional[TUIConfig] = None,
     ) -> None:
         super().__init__()
-        self.base_url = base_url
-        self.llm_base_url = llm_base_url or base_url.rsplit(":", 1)[0] + ":8005"
-        self.default_model = default_model
-        self.default_providers = default_providers or [
-            "searxng", "wikipedia", "github", "hackernews",
-        ]
+        # Load config: explicit > file > env-var defaults
+        self._config = config or load_or_default()
+        # CLI/env overrides
+        if base_url:
+            self._config.base_url = base_url
+        if llm_base_url:
+            self._config.llm_base_url = llm_base_url
+        if default_model:
+            self._config.default_model = default_model
+        if default_providers:
+            self._config.default_providers = default_providers
+        # Flatten onto the app for backward compat
+        self.base_url = self._config.base_url
+        self.llm_base_url = self._config.resolved_llm_base_url()
+        self.default_model = self._config.default_model
+        self.default_providers = list(self._config.default_providers)
         self.last_citation_report = None
+        # History
+        self.history: Optional[HistoryDB] = None
+        if self._config.auto_save_history:
+            try:
+                self.history = HistoryDB(limit=self._config.history_limit)
+            except Exception as e:
+                self.status_message = f"history disabled: {e}"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -590,6 +756,14 @@ class DeepSearchTUI(App):
         for w in self.workers:
             w.cancel()
 
+    def action_save_config(self) -> None:
+        """Persist current config to disk."""
+        try:
+            self._config.save()
+            self.status_message = f"config saved → {CONFIG_PATH}"
+        except Exception as e:
+            self.status_message = f"config save failed: {e}"
+
 
 # ─── Entry point ──────────────────────────────────────────────────────
 
@@ -618,3 +792,35 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ─── Output export helper (referenced by Save buttons in each tab) ──────
+
+
+def _save_log_to_file(log_widget, prefix: str = "output", parent=None) -> None:
+    """Save a Log widget's content to ~/Documents/deepsearch-{prefix}-{ts}.md.
+
+    Used by the per-tab Save buttons.
+    """
+    from datetime import datetime as _dt
+    try:
+        lines = []
+        for ln in log_widget.lines:
+            if isinstance(ln, str):
+                lines.append(ln)
+            else:
+                try:
+                    lines.append(str(ln))
+                except Exception:
+                    lines.append(repr(ln))
+        body = "\n".join(lines)
+        docs = Path(os.environ.get("XDG_DOCUMENTS_DIR", str(Path.home() / "Documents")))
+        docs.mkdir(parents=True, exist_ok=True)
+        ts = _dt.now().strftime("%Y%m%d-%H%M%S")
+        out = docs / f"deepsearch-{prefix}-{ts}.md"
+        out.write_text(body)
+        if parent is not None:
+            parent.app.status_message = f"saved → {out}"
+    except Exception as e:
+        if parent is not None:
+            parent.app.status_message = f"save failed: {e}"

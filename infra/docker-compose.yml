@@ -6,6 +6,8 @@
 volumes:
   postgres_data:
   yacy_data:
+  tui_config:
+  tui_history:
   redis_data:
   vector_data:
   warehouse_data:
@@ -263,6 +265,32 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # --- TUI (interactive, opt-in) ---
+  # Launch with:  make tui
+  # Or:          docker compose run --rm dss-tui
+  # Not started by `make up` — it's a client, not a server.
+  dss-tui:
+    profiles: ["with-tui"]
+    build:
+      context: ..
+      dockerfile: sdk/python/tui/Dockerfile
+    container_name: dss-tui
+    init: true  # proper signal handling for Ctrl+C
+    environment:
+      # When running inside the dss network, the TUI talks to nginx directly.
+      DEEPSEARCH_BASE_URL: "http://nginx:80"
+      DEEPSEARCH_LLM_URL:  "http://inference-gateway:8005"
+      DEEPSEARCH_MODEL: "virtual/free-coder"
+      TERM: "xterm-256color"
+    networks:
+      - deepsearch_net
+    stdin_open: true
+    tty: true
+    volumes:
+      # Persist TUI config + history across container restarts
+      - tui_config:/root/.config/deepsearch
+      - tui_history:/root/.local/share/deepsearch
 
   # --- PROXY (optional, enable with --profile with-proxy) ---
   proxy-rotator:

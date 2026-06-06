@@ -381,6 +381,14 @@ tui:
 		echo -e "$(RED)✖ web-api is not running. Run: make up STACK=full$(NC)"; \
 		exit 1; \
 	fi
+	@echo -e "$(CYAN)🖥️  Launching TUI in container (dss-tui)$(NC)"
+	@$(COMPOSE) --profile with-tui run --rm dss-tui
+
+tui-local:
+	@if ! $(COMPOSE) ps --status running 2>/dev/null | grep -q web-api; then \
+		echo -e "$(RED)✖ web-api is not running. Run: make up STACK=full$(NC)"; \
+		exit 1; \
+	fi
 	@cd $(TUI_DIR) && python3 app.py $(TUI_FLAGS)
 
 tui-test:
@@ -516,7 +524,7 @@ restart-llm:    service=inference-gateway ; $(MAKE) --no-print-directory restart
 .PHONY: shell-web shell-search shell-agent shell-llm shell-vec shell-wh shell-crawl shell-db shell-redis
 .PHONY: logs-web logs-search logs-agent logs-llm logs-vec logs-wh logs-crawl logs-db
 .PHONY: restart-web restart-search restart-agent restart-llm
-.PHONY: tui tui-test tui-screenshot sdk-install sdk-test sdk-test-unit sdk-repl
+.PHONY: tui tui-local tui-test tui-screenshot sdk-install sdk-test sdk-test-unit sdk-repl
 .PHONY: ping audit todo versions env-diff check-deps
 
 # --- Quick API curls (most common debug) -------------------------------
