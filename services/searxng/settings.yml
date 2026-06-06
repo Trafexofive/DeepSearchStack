@@ -300,6 +300,9 @@ outgoing:
   max_request_timeout: 30.0
   useragent_suffix: ""
   enable_http2: true
-  proxies:
-    http: http://proxy-rotator:8888
-    https: http://proxy-rotator:8888
+  # BUGFIX: removed hardcoded proxy. proxy-rotator is in the
+  # with-proxy compose profile (not started in the default full
+  # stack), so referencing it here caused every engine to fail
+  # with httpx.ConnectError: Name or service not known. Direct
+  # connection works for most engines. To re-enable the proxy,
+  # start with --profile with-proxy and re-add the proxies block.

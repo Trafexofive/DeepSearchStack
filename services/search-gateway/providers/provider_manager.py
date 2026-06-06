@@ -136,6 +136,12 @@ class SearchProviderManager:
             elif provider == SearchProvider.ARXIV:
                 params = {"search_query": f"all:{query}", "start": 0, "max_results": 10}
                 # Respect arXiv rate limit: 1 request per 3 seconds
+                # BUGFIX: was UnboundLocalError — module-level _ARXIV_LAST_REQUEST
+                # can't be assigned inside a function without `global`. Use the
+                # circuit-breaker's throttling instead (already has rate limit
+                # machinery) or declare global. We use `global` here to keep
+                # the fix local and behavior identical.
+                global _ARXIV_LAST_REQUEST
                 import asyncio as _asyncio_arxiv
                 now = time.monotonic()
                 wait = _ARXIV_MIN_INTERVAL - (now - _ARXIV_LAST_REQUEST)
