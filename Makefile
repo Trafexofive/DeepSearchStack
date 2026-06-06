@@ -631,9 +631,13 @@ git-status:                                     # short git status of the workin
 e2e: sdk-test tui-test                         # full E2E: SDK + TUI against live stack
 	@echo -e "$(GREEN)✅ E2E suite passed$(NC)"
 
+persistence-test:                               # verify data survives down + up
+	@echo -e "$(BLUE)💾 Running persistence E2E test$(NC)"
+	@bash tests/persistence/test_e2e_persistence.sh
+
 snapshot:                                       # capture TUI screenshot + version info
 	@$(MAKE) --no-print-directory tui-screenshot
 	@$(MAKE) --no-print-directory versions | tee $(TUI_DIR)/snapshot.txt
 	@echo -e "$(GREEN)✅ snapshot saved$(NC)"
 
-.PHONY: e2e snapshot
+.PHONY: e2e persistence-test snapshot

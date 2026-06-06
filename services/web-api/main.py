@@ -340,6 +340,37 @@ async def shutdown():
         log.warning("shutdown_save_hashes_failed: %s", e)
 
 
+@app.post("/api/admin/save-hashes")
+async def force_save_hashes():
+    """Force an immediate save of the embed-hash dedup set to disk.
+
+    Useful for tests that need to verify persistence without waiting
+    for the 60s periodic save or a clean shutdown. Also exposes
+    the current state for observability.
+    """
+    try:
+        _save_hashes()
+        return {"saved": True, "count": len(_embed_hashes), "path": str(HASH_DB_PATH)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/hash-state")
+async def get_hash_state():
+    """Return the current in-memory + on-disk hash state (for tests/observability)."""
+    disk = []
+    try:
+        if HASH_DB_PATH.exists():
+            disk = json.loads(HASH_DB_PATH.read_text())
+    except Exception as e:
+        return {"memory_count": len(_embed_hashes), "disk_count": -1, "disk_error": str(e)}
+    return {
+        "memory_count": len(_embed_hashes),
+        "disk_count": len(disk),
+        "memory_minus_disk": list(_embed_hashes - set(disk)),
+    }
+
+
 # ─── Helpers ───────────────────────────────────────────────
 
 # Provider list - default 7 verified-working, non-redundant providers across 7 domains.

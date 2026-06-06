@@ -96,6 +96,15 @@ _cache_sem = asyncio.Semaphore(1)  # SQLite concurrency guard
 def _cache_key(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()
 
+# Cache table column order. Static — define once.
+# MUST match the schema in _init_cache().
+_CACHE_COLUMNS = [
+    "url_hash", "url", "content", "markdown", "title", "author", "published",
+    "language", "word_count", "success", "error_type", "error_message",
+    "crawled_at", "headers_json", "source_domain",
+]
+
+
 def _cache_get(url: str, ttl: int = DEFAULT_TTL_SECONDS) -> Optional[dict]:
     key = _cache_key(url)
     with _connect_db(CACHE_DB) as conn:
@@ -103,9 +112,13 @@ def _cache_get(url: str, ttl: int = DEFAULT_TTL_SECONDS) -> Optional[dict]:
             "SELECT * FROM cache WHERE url_hash = ? AND crawled_at > ?",
             (key, time.time() - ttl),
         ).fetchone()
+    # BUGFIX (was): cols query was outside the `with` block AND used `d[0]`
+    # (the column cid / integer index) instead of `d[1]` (the column name).
+    # Result: the dict had integer keys, so `cached.get("markdown")` always
+    # returned None, the "markdown non-empty" check failed, and every
+    # re-crawl was treated as a miss. Now we use the static _CACHE_COLUMNS.
     if row:
-        cols = [d[0] for d in conn.execute("PRAGMA table_info(cache)").fetchall()]
-        return dict(zip(cols, row))
+        return dict(zip(_CACHE_COLUMNS, row))
     return None
 
 def _cache_put(url: str, data: dict):
