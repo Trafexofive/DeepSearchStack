@@ -1735,11 +1735,48 @@ async def stats():
     )
 
 
+async def _vector_delete(row_id: int) -> None:
+    """Best-effort vector-store delete for warehouse row {row_id}.
+
+    Embeddings are keyed `warehouse:wh-{row_id}` — the warehouse posts
+    `id="wh-{row_id}"` but with `namespace="warehouse"`, and vector-store
+    rewrites the stored id to `{namespace}:{id}`. The delete has to use
+    the rewritten form or it silently no-ops.
+
+    If the vector-store is down we log and move on — the SQLite delete
+    already committed.
+    """
+    full_id = f"warehouse:wh-{row_id}"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.request(
+                "DELETE",
+                f"{VECTOR_STORE_URL}/documents",
+                json={"ids": [full_id]},
+            )
+            if r.status_code not in (200, 204):
+                log.warning("vector_delete_unexpected id=%s status=%s body=%s",
+                            full_id, r.status_code, r.text[:120])
+            else:
+                log.info("vector_delete_ok id=%s", full_id)
+    except Exception as e:
+        log.warning("vector_delete_failed id=%s err=%s", full_id, e)
+
+
 @app.delete("/content/{item_id}")
 async def delete_content(item_id: int):
-    """Delete a content item."""
+    """Delete a content item from both SQLite AND the vector store.
+
+    Without the vector-store delete the embedding would dangle and the
+    deleted row keeps surfacing in /api/search/hybrid via vec_rank.
+    """
     with write_txn() as conn:
         conn.execute("DELETE FROM content WHERE id = ?", (item_id,))
+    # Fire-and-forget — keeps the HTTP response snappy. The vector-store
+    # delete is best-effort; if it fails the next vector_audit job will
+    # catch dangling embeddings (or operators can call /admin/backfill-
+    # embeddings to reconcile).
+    asyncio.create_task(_vector_delete(item_id))
     return {"deleted": item_id}
 
 

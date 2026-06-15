@@ -422,6 +422,15 @@ _BLOCKED_HTML_PATTERNS = [
         r"please enable (javascript|js)", r"access denied",
         r"are you a robot", r"unusual traffic", r"captcha",
         r"cf-challenge", r"ddos protection",
+        # Cloudflare/Datadome/Akamai human-verification interstitials.
+        # These pages aren't strict paywalls but they ARE blocking the
+        # real content — should escalate to wayback like any other block.
+        r"confirm.{0,12}(that\s+)?you[' ]?re?\s*human",
+        r"verify.{0,12}(that\s+)?you[' ]?re?\s*human",
+        r"prove you are (not a robot|human)",
+        r"complete the captcha",
+        r"press and hold",
+        r"slide right to secure your access",
     ]
 ]
 
@@ -1116,20 +1125,23 @@ async def _do_crawl(req: CrawlRequest, rid: str = "") -> CrawlResponse:
                 if br.get("blocked"):
                     blocked_now = True
                     block_reason = block_reason or br.get("block_reason")
-                # If we already got OCR text from the renderer, consider adopting it
+                # If we already got OCR text from the renderer, consider adopting it.
+                # Re-run _should_escalate on the adopted text — OCR sometimes
+                # returns the CAPTCHA/bot-challenge text itself, which still
+                # needs a wayback fallback. Don't blindly mark blocked_now=False.
                 renderer_ocr = br.get("ocr_text") or ""
                 if force_ocr and renderer_ocr:
                     markdown = renderer_ocr
                     text = renderer_ocr
                     extraction_method = "ocr"
                     escalations.append("ocr")
-                    blocked_now, block_reason = False, None
+                    blocked_now, block_reason = _should_escalate(markdown)
                 elif renderer_ocr and len(renderer_ocr) > len(markdown):
                     markdown = renderer_ocr
                     text = renderer_ocr
                     extraction_method = "ocr"
                     escalations.append("ocr")
-                    blocked_now, block_reason = False, None
+                    blocked_now, block_reason = _should_escalate(markdown)
 
         # OCR-only fallback path: if we hit here without going through browser
         # escalation (render_mode=fast then auto-detected blocked), run OCR now.
@@ -1147,7 +1159,7 @@ async def _do_crawl(req: CrawlRequest, rid: str = "") -> CrawlResponse:
                     text = ocr_text
                     extraction_method = "ocr"
                     escalations.append("ocr")
-                    blocked_now, block_reason = False, None
+                    blocked_now, block_reason = _should_escalate(markdown)
 
         # ── Wayback fallback ──────────────────────────────────────────
         # After browser + OCR, if we're still blocked OR the content
