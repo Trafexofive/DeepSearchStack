@@ -902,6 +902,15 @@ async def hybrid_search(
     enriched HybridHit objects so callers can show provenance + content.
     """
     import time
+    # Degenerate-query gate: FTS5 returns nothing for whitespace-only or
+    # 1-char queries, but the vector store happily embeds " " and returns
+    # its 30 nearest neighbors — essentially a random sample. Bail
+    # early so callers can't accidentally pull "random highly-ranked rows"
+    # by sending an empty query.
+    if not q or len(q.strip()) < 2:
+        return HybridSearchResponse(
+            query=q, hits=[], fts_hits=0, vec_hits=0, merged=0, elapsed_ms=0,
+        )
     t0 = time.time()
     client = http()
 
