@@ -1,0 +1,42 @@
+# DeepSearchStack — knowledge-warehouse runtime config.
+#
+# Mount: this directory is bind-mounted at /app/config in the
+# knowledge-warehouse container. Edit + restart the warehouse to pick up
+# changes. Anything not listed here falls back to the built-in defaults
+# in services/knowledge-warehouse/main.py.
+
+quality_gate:
+  # Master switch. Set false to ingest everything (warehouse-rot risk).
+  enabled: true
+
+  # Reject rows below this word count (the rule of thumb: under ~150 words
+  # most pages are nav stubs, redirects, paywalls, or stub bios).
+  min_word_count: 150
+
+  # Reject when the crawler's own confidence estimate is too low.
+  # 0.0 = no signal, 1.0 = clean HTML extraction with rich body.
+  # See _forward_to_warehouse in services/crawler/main.py.
+  min_extraction_confidence: 0.30
+
+  # Reject pages that look like a nav dump (sea of short fragments,
+  # high separator density, no real sentences). Cheap heuristic — the
+  # crawler already demotes OCR nav dumps; this catches HTML nav dumps
+  # that slip through.
+  reject_nav_dumps: true
+
+  # Per-category overrides. Each key is a category from classify()
+  # (paper, manual, doc, reference, code, qa, news, blog, social,
+  #  video, feed, other). Drop a category to inherit the defaults above.
+  per_category:
+    code:
+      # README snippets and code-host pages are often legitimately
+      # short — relax word count, keep the confidence floor.
+      min_word_count: 50
+    qa:
+      min_word_count: 80
+    social:
+      # Tweets, HN comments, Reddit threads. Often short but valuable.
+      min_word_count: 30
+    feed:
+      # RSS items already trimmed by the feed.
+      min_word_count: 60

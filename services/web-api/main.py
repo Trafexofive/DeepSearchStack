@@ -443,6 +443,35 @@ async def _multi_provider_search(query: str, max_results: int) -> List[dict]:
         return []
 
 
+async def _warehouse_fetch_bodies(ids: List[int], cap_chars: int = 4000) -> dict:
+    """Fetch warehouse markdown bodies for a list of row ids, in parallel.
+
+    Returns `{id: markdown[:cap_chars]}`. Failures swallow per-id (logged)
+    so a single missing row doesn't kill the synthesis pipeline.
+    Used by /aggregate to lift hybrid hits from snippet → full body for
+    the reconciliation prompt.
+    """
+    if not ids:
+        return {}
+    sem = asyncio.Semaphore(8)
+
+    async def one(i: int) -> tuple[int, str]:
+        async with sem:
+            try:
+                async with _shared_client(timeout=5.0) as client:
+                    r = await client.get(f"{WAREHOUSE_URL}/content/{i}")
+                    if r.status_code != 200:
+                        return i, ""
+                    body = (r.json().get("markdown") or "")[:cap_chars]
+                    return i, body
+            except Exception as e:
+                log.warning("warehouse_body_fetch_failed id=%s err=%s", i, e)
+                return i, ""
+
+    pairs = await asyncio.gather(*[one(i) for i in ids])
+    return {i: md for i, md in pairs if md}
+
+
 async def _warehouse_search(query: str, limit: int = 10) -> List[dict]:
     """Hybrid retrieval: FTS5 + vector store fused with RRF.
 
@@ -674,11 +703,35 @@ def _extract_entities(text: str) -> list[str]:
 
 
 def _build_reconciliation_prompt(query: str, sources: List[SourceResult]) -> str:
-    """Build a prompt asking the LLM to reconcile facts across domains."""
-    source_text = "\n\n".join(
-        f"[{i+1}] [{s.domain}] {s.title}\n    {s.description[:300]}"
-        for i, s in enumerate(sources[:15])
-    )
+    """Build a prompt asking the LLM to reconcile facts across domains.
+
+    Context budget: total source body text capped (env-tunable). Per
+    source: prefer full markdown (from scrape or warehouse hit) up to
+    per_source_cap, else fall back to the 300-char snippet. Sources are
+    added until either the budget is exhausted or 15 sources are included.
+
+    Tuning knobs (env):
+      RECONCILE_PER_SOURCE_CAP   default 1200  (chars per source body)
+      RECONCILE_TOTAL_BUDGET     default 6000  (total source body chars)
+    Defaults sized for a free/queued reasoning model — bigger context
+    causes long latency or timeouts in practice.
+    """
+    PER_SOURCE_CAP = int(os.environ.get("RECONCILE_PER_SOURCE_CAP", "1200"))
+    TOTAL_BUDGET = int(os.environ.get("RECONCILE_TOTAL_BUDGET", "6000"))
+    used = 0
+    parts: list[str] = []
+    for i, s in enumerate(sources[:15]):
+        if s.markdown:
+            body = s.markdown[:PER_SOURCE_CAP].strip()
+            kind = "BODY"
+        else:
+            body = (s.description or "")[:300].strip()
+            kind = "SNIPPET"
+        parts.append(f"[{i+1}] [{s.domain}] {s.title}\n    ({kind}) {body}")
+        used += len(body)
+        if used >= TOTAL_BUDGET:
+            break
+    source_text = "\n\n".join(parts)
     return f"""You are a cross-domain fact reconciler. Analyze these sources about "{query}" and extract a consensus.
 
 SOURCES:
@@ -705,7 +758,8 @@ async def _llm_reconcile(query: str, sources: List[SourceResult]) -> dict:
         prompt = _build_reconciliation_prompt(query, sources)
         model = os.environ.get("RECONCILE_MODEL", "deepseek-v4-flash-free")
         max_tokens = int(os.environ.get("RECONCILE_MAX_TOKENS", "8192"))
-        async with _shared_client(timeout=60.0) as client:
+        timeout_s = float(os.environ.get("RECONCILE_TIMEOUT_SEC", "120"))
+        async with _shared_client(timeout=timeout_s) as client:
             resp = await client.post(
                 f"{INFERENCE_GATEWAY_URL}/v1/chat/completions",
                 json={
@@ -1120,6 +1174,25 @@ async def cross_domain_aggregate(req: AggregateRequest):
         metrics.incr("rag.chunks_retrieved", len(rag_chunks))
         log.info("rag chunks=%d for query=%s", len(rag_chunks), req.query)
 
+    # 2.7 Warehouse-hit body hydration. Top warehouse hits arrive with
+    # only a snippet (FTS5 highlight). When synthesis is going to run, fetch
+    # the full markdown so the LLM gets the actual archived page text — turns
+    # every prior crawl into compounding context for future answers.
+    if req.enable_synthesis and req.reconcile and warehouse_results:
+        wh_ids = [r["id"] for r in warehouse_results[:8] if r.get("id")]
+        # Skip sources we already filled via scraping above (avoid double cost).
+        wh_ids = [i for i, r in zip(wh_ids, warehouse_results[:8])
+                  if not any(s.url == r["url"] and s.markdown for s in sources)]
+        bodies = await _warehouse_fetch_bodies(wh_ids, cap_chars=2500)
+        if bodies:
+            url_to_md = {r["url"]: bodies.get(r["id"], "")
+                         for r in warehouse_results if r.get("id") in bodies}
+            for s in sources:
+                if not s.markdown and url_to_md.get(s.url):
+                    s.markdown = url_to_md[s.url]
+            log.info("warehouse_bodies_loaded count=%d query=%s",
+                     len(bodies), req.query)
+
     # 3. Cross-domain reconciliation via LLM
     consensus = None
     synthesis = None
@@ -1165,7 +1238,14 @@ async def cross_domain_aggregate(req: AggregateRequest):
     # Cache the result (fire-and-forget). Warehouse persistence is the
     # crawler's job — it forwards every successful /crawl to the warehouse
     # via FORWARD_TO_WAREHOUSE. web-api stays out of the persistence path.
-    asyncio.create_task(_cache_set(ck, response.model_dump()))
+    # Skip the cache when the caller asked for synthesis and we returned
+    # nothing — almost always a transient LLM timeout; we'd rather pay the
+    # next call than poison the cache with a null answer.
+    expected_synth = req.enable_synthesis and req.reconcile
+    if not (expected_synth and not synthesis):
+        asyncio.create_task(_cache_set(ck, response.model_dump()))
+    else:
+        log.info("skip_cache_empty_synthesis query=%s", req.query)
 
     return response
 

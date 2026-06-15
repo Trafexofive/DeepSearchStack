@@ -1609,6 +1609,45 @@ async def _discover_site_urls(entry_url: str, *, max_urls: int,
         return True
 
     async with _httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        # Resolve entry_url to its canonical host. Two cases to handle:
+        #   1. `www.foo.com` 30x's to `foo.com` (or vice versa) — we follow
+        #      the redirect chain and reset host/base.
+        #   2. `www.foo.com` doesn't resolve at all (some sites serve only
+        #      the apex). HEAD throws DNS error. We retry the apex
+        #      automatically — most operators who type the www form
+        #      expect it to "just work".
+        async def _probe_canonical(url: str) -> Optional[str]:
+            try:
+                r = await client.head(url, timeout=8.0)
+                if r.status_code < 400:
+                    return str(r.url)
+            except Exception:
+                pass
+            return None
+
+        candidates: list[str] = [entry_url]
+        if host.startswith("www."):
+            candidates.append(entry_url.replace("://www.", "://", 1))
+        else:
+            candidates.append(entry_url.replace("://", "://www.", 1))
+
+        resolved: Optional[str] = None
+        for cand in candidates:
+            resolved = await _probe_canonical(cand)
+            if resolved:
+                break
+
+        if resolved:
+            final_parsed = urlparse(resolved)
+            if final_parsed.netloc and final_parsed.netloc != host:
+                log.info("site_discover_host_redirect from=%s to=%s",
+                         host, final_parsed.netloc)
+                host = final_parsed.netloc
+                base = f"{final_parsed.scheme}://{host}"
+                entry_url = resolved
+        else:
+            log.info("site_discover_head_failed url=%s — sitemap probe will "
+                     "still try", entry_url[:100])
         # 1. If entry_url IS a sitemap or feed, parse it directly.
         # Otherwise probe sitemap candidates.
         sitemap_candidates: list[str] = []

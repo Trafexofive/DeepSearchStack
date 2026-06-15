@@ -6,13 +6,12 @@
 volumes:
   postgres_data:
   yacy_data:
-  tui_config:
-  tui_history:
   redis_data:
   vector_data:
   warehouse_data:
   crawler_cache:
   web_api_data:
+  browser_screenshots:
 
 networks:
   deepsearch_net:
@@ -95,6 +94,7 @@ services:
       - YACY_URL=http://yacy:8090
       - SEARXNG_URL=http://searxng:8080
       - REDIS_URL=redis://redis:6379/0
+      - PROXY_ROTATOR_URL=${PROXY_ROTATOR_URL:-http://proxy-rotator:8888}
 
   # --- SEARCH BACKENDS ---
   yacy:
@@ -156,6 +156,8 @@ services:
       - CRAWLER_CONCURRENCY=10
       - HTTP_PROXY=${CRAWLER_HTTP_PROXY:-}
       - HTTPS_PROXY=${CRAWLER_HTTPS_PROXY:-}
+      - BROWSER_RENDERER_URL=http://browser-renderer:8015
+      - CRAWLER_THIN_THRESHOLD=${CRAWLER_THIN_THRESHOLD:-500}
     volumes:
       - crawler_cache:/app/cache
     healthcheck:
@@ -163,6 +165,29 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
+
+  browser-renderer:
+    build:
+      context: ..
+      dockerfile: services/browser-renderer/Dockerfile
+    container_name: dss-browser-renderer
+    restart: unless-stopped
+    networks:
+      - deepsearch_net
+    environment:
+      - BROWSER_USER_AGENT=${BROWSER_USER_AGENT:-Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36}
+      - BROWSER_VIEWPORT_W=${BROWSER_VIEWPORT_W:-1366}
+      - BROWSER_VIEWPORT_H=${BROWSER_VIEWPORT_H:-850}
+      - BROWSER_MAX_CONCURRENT=${BROWSER_MAX_CONCURRENT:-4}
+      - BROWSER_NAV_TIMEOUT_MS=${BROWSER_NAV_TIMEOUT_MS:-25000}
+    volumes:
+      - browser_screenshots:/app/screenshots
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,json; r=urllib.request.urlopen('http://localhost:8015/health'); d=json.loads(r.read()); exit(0 if d.get('ready') else 1)"]
+      interval: 15s
+      timeout: 8s
+      retries: 5
       start_period: 30s
 
   knowledge-warehouse:
@@ -175,8 +200,22 @@ services:
       - deepsearch_net
     environment:
       - PORT=8009
+      - VECTOR_STORE_URL=http://vector-store:8004
+      - MIN_EMBED_WORDS=${MIN_EMBED_WORDS:-150}
+      - EMBED_TEXT_CAP=${EMBED_TEXT_CAP:-4000}
+      # Re-crawl scheduler: enabled by default, kicks stale URLs every 30min.
+      - CRAWLER_URL=http://crawler:8000
+      - RECRAWL_ENABLED=${RECRAWL_ENABLED:-true}
+      - RECRAWL_INTERVAL_SEC=${RECRAWL_INTERVAL_SEC:-1800}
+      - RECRAWL_BATCH=${RECRAWL_BATCH:-20}
+      - RECRAWL_CONCURRENCY=${RECRAWL_CONCURRENCY:-3}
+      - RECRAWL_DEFAULT_TTL_SEC=${RECRAWL_DEFAULT_TTL_SEC:-1209600}
+      - RECRAWL_MIN_GAP_SEC=${RECRAWL_MIN_GAP_SEC:-3600}
     volumes:
       - warehouse_data:/app/data
+      # YAML config (quality_gate, per-category overrides). Read-only —
+      # the service reads at startup and never writes back.
+      - ./config/services:/app/config:ro
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8009/health')"]
       interval: 30s
@@ -266,35 +305,14 @@ services:
       retries: 3
       start_period: 10s
 
-  # --- TUI (interactive, opt-in) ---
-  # Launch with:  make tui
-  # Or:          docker compose run --rm dss-tui
-  # Not started by `make up` — it's a client, not a server.
-  dss-tui:
-    profiles: ["with-tui"]
-    build:
-      context: ..
-      dockerfile: sdk/python/tui/Dockerfile
-    container_name: dss-tui
-    init: true  # proper signal handling for Ctrl+C
-    environment:
-      # When running inside the dss network, the TUI talks to nginx directly.
-      DEEPSEARCH_BASE_URL: "http://nginx:80"
-      DEEPSEARCH_LLM_URL:  "http://inference-gateway:8005"
-      DEEPSEARCH_MODEL: "virtual/free-coder"
-      TERM: "xterm-256color"
-    networks:
-      - deepsearch_net
-    stdin_open: true
-    tty: true
-    volumes:
-      # Persist TUI config + history across container restarts
-      - tui_config:/root/.config/deepsearch
-      - tui_history:/root/.local/share/deepsearch
+  # The TUI lives at clients/tui-go/ — a single static Go binary.
+  # Launch with:  make tui   (builds + runs ./clients/tui-go/dss-tui)
 
   # --- PROXY (optional, enable with --profile with-proxy) ---
+  # Proxy rotator — Tor via Privoxy on port 8888. Search-gateway uses this
+  # as a retry path for IP-blocked providers like Reddit. Now started by
+  # default so Reddit calls have a fallback.
   proxy-rotator:
-    profiles: ["with-proxy"]
     build:
       context: ..
       dockerfile: services/proxy-rotator/Dockerfile

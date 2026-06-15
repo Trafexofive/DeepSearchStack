@@ -26,6 +26,8 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from libs.common.yaml_config import load_service_config
+
 # ─── Config ───────────────────────────────────────────────
 DATA_DIR = Path(os.environ.get("WAREHOUSE_DATA_DIR", "/app/data"))
 DB_PATH = DATA_DIR / "warehouse.db"
@@ -44,6 +46,83 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [warehouse] %(message)s",
 )
 log = logging.getLogger("warehouse")
+
+# ─── YAML config (quality gate, etc.) ──────────────────────
+# Loaded once at import; values are immutable for the process lifetime.
+# Restart the warehouse to pick up edits to
+# infra/config/services/knowledge-warehouse.yaml.
+_CONFIG_DEFAULTS: dict = {
+    "quality_gate": {
+        "enabled": True,
+        "min_word_count": 150,
+        "min_extraction_confidence": 0.30,
+        "reject_nav_dumps": True,
+        "per_category": {},
+    },
+}
+CONFIG = load_service_config("knowledge-warehouse", defaults=_CONFIG_DEFAULTS)
+QUALITY_GATE = CONFIG.get("quality_gate", _CONFIG_DEFAULTS["quality_gate"])
+
+# In-process counters for /stats. SQLite stays the source of truth for the
+# *current* state; these are just "how many rejections has this process
+# seen since boot", reset on restart. Good enough for ops visibility.
+_quality_rejected_total = 0
+_quality_rejected_by_reason: dict[str, int] = {}
+
+
+def _nav_dump_score(markdown: str) -> bool:
+    """Cheap is-this-page-just-navigation check.
+
+    Two signals: (1) a sea of short lines (likely menu items), and
+    (2) low sentence density relative to line count. Either trips it.
+    Same heuristic the crawler uses on OCR output — applied here so HTML
+    nav dumps that survive `strip_boilerplate` also get caught.
+    """
+    if not markdown:
+        return True
+    lines = [l for l in markdown.split("\n") if l.strip()]
+    if not lines:
+        return True
+    short = sum(1 for l in lines if len(l.strip()) < 40)
+    short_frac = short / len(lines)
+    # Sentence-ish: capitalized word followed by 20+ chars and a terminator.
+    import re as _re
+    sentences = len(_re.findall(r"[A-Z][^\.!?\n]{20,}[\.!?]", markdown))
+    return short_frac > 0.70 and sentences < 3
+
+
+def _quality_gate_decide(
+    *, word_count: int, extraction_confidence: Optional[float],
+    category: Optional[str], markdown: str,
+) -> Optional[str]:
+    """Return None to allow ingest, or a short rejection reason string."""
+    gate = QUALITY_GATE
+    if not gate.get("enabled", True):
+        return None
+
+    # Per-category overrides (e.g. code:30 words instead of 150).
+    overrides = (gate.get("per_category") or {}).get(category) or {}
+
+    min_wc = overrides.get("min_word_count", gate.get("min_word_count", 150))
+    if word_count < min_wc:
+        return f"word_count:{word_count}<{min_wc}"
+
+    min_conf = overrides.get("min_extraction_confidence",
+                             gate.get("min_extraction_confidence", 0.30))
+    if extraction_confidence is not None and extraction_confidence < min_conf:
+        return f"confidence:{extraction_confidence:.2f}<{min_conf}"
+
+    if gate.get("reject_nav_dumps", True) and _nav_dump_score(markdown):
+        return "nav_dump"
+
+    return None
+
+
+def _record_rejection(reason: str) -> None:
+    global _quality_rejected_total
+    _quality_rejected_total += 1
+    _quality_rejected_by_reason[reason] = _quality_rejected_by_reason.get(reason, 0) + 1
+
 
 app = FastAPI(title="Knowledge Warehouse", version="2.0.0")
 
@@ -905,10 +984,13 @@ class IngestResponse(BaseModel):
     ingested: bool
     cached: bool = False
     # v2 fields — let the caller know what happened.
-    action: str = "inserted"  # "inserted" | "alias" | "revision" | "unchanged"
+    action: str = "inserted"  # "inserted" | "alias" | "revision" | "unchanged" | "rejected"
     revision: int = 1
     content_sha256: Optional[str] = None
     superseded_id: Optional[int] = None
+    # Populated when action == "rejected" so callers (crawler logs, CLI)
+    # can see WHY the warehouse refused to store the row.
+    rejected_reason: Optional[str] = None
 
 
 class ContentItem(BaseModel):
@@ -960,6 +1042,9 @@ class StatsResponse(BaseModel):
     extractors: dict = {}
     by_provider: dict = {}
     categories: dict = {}
+    # Quality gate (process-lifetime counters; reset on restart).
+    quality_rejected_total: int = 0
+    quality_rejected_by_reason: dict = {}
 
 
 # ─── Content classification (v2.3) ───────────────────────────────────────
@@ -1173,6 +1258,28 @@ async def ingest(req: IngestRequest):
         # Classify once per ingest so revisions get the same bucket as the
         # original (and we don't re-run the classifier on every revision read).
         category = classify(req.url, domain, req.extractor, md)
+
+        # Quality gate. Applied for brand-new rows AND new revisions (we
+        # don't want the warehouse to *replace* a good row with a degraded
+        # re-crawl). "alias"/"unchanged" paths already returned above —
+        # those reuse existing rows, no new storage cost.
+        reject_reason = _quality_gate_decide(
+            word_count=req.word_count or len(md.split()),
+            extraction_confidence=req.extraction_confidence,
+            category=category,
+            markdown=md,
+        )
+        if reject_reason:
+            _record_rejection(reject_reason)
+            log.info("ingest_rejected url=%s reason=%s words=%d conf=%s cat=%s",
+                     req.url[:100], reject_reason, req.word_count,
+                     req.extraction_confidence, category)
+            return IngestResponse(
+                id=0, url=req.url, ingested=False, cached=False,
+                action="rejected", rejected_reason=reject_reason,
+                content_sha256=content_sha,
+            )
+
         if prior:
             prior_id, prior_rev = prior
             conn.execute("UPDATE content SET is_current = 0, status = 'superseded' WHERE id = ?", (prior_id,))
@@ -1623,6 +1730,8 @@ async def stats():
         extractors=extractors,
         by_provider=by_provider,
         categories=categories,
+        quality_rejected_total=_quality_rejected_total,
+        quality_rejected_by_reason=dict(_quality_rejected_by_reason),
     )
 
 
