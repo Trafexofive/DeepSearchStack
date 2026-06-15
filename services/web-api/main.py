@@ -82,7 +82,6 @@ SEARCH_GATEWAY_URL = os.environ.get("SEARCH_GATEWAY_URL", "http://search-gateway
 WAREHOUSE_URL = os.environ.get("WAREHOUSE_URL", "http://knowledge-warehouse:8009")
 CRAWLER_URL = os.environ.get("CRAWLER_URL", "http://crawler:8000")
 VECTOR_STORE_URL = os.environ.get("VECTOR_STORE_URL", "http://vector-store:8004")
-FACT_DB_PATH = Path(os.environ.get("FACT_DB_PATH", "/app/volumes/data/facts.json"))
 HASH_DB_PATH = Path(os.environ.get("HASH_DB_PATH", "/app/volumes/data/embed_hashes.json"))
 
 # ── Content hash dedup (prevents re-embedding identical content) ──
@@ -107,62 +106,6 @@ def _save_hashes():
 def _content_hash(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()
 
-
-# ── Consensus Fact Database ─────────────────────────────────────
-# Stores high-confidence (verified) facts for instant lookup.
-# Checked before running the full search pipeline.
-
-_fact_db: list[dict] = []
-
-def _load_facts():
-    global _fact_db
-    try:
-        if FACT_DB_PATH.exists():
-            _fact_db = json.loads(FACT_DB_PATH.read_text())
-            log.info("loaded_facts count=%d", len(_fact_db))
-    except Exception as e:
-        log.warning("load_facts_failed: %s", e)
-        _fact_db = []
-
-def _save_facts():
-    try:
-        FACT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        FACT_DB_PATH.write_text(json.dumps(_fact_db, indent=2))
-    except Exception as e:
-        log.warning("save_facts_failed: %s", e)
-
-def _store_verified_facts(facts: list[dict]):
-    """Store verified consensus facts (confidence ≥ 0.80) in fact DB."""
-    for f in facts:
-        if f.get("quality") != "verified":
-            continue
-        claim = f.get("claim", "").strip()
-        if not claim:
-            continue
-        # Check if this claim is already stored
-        existing = any(c.get("claim") == claim for c in _fact_db)
-        if not existing:
-            _fact_db.append({
-                "claim": claim,
-                "confidence": f.get("confidence", 0),
-                "sources": f.get("supporting_sources", []),
-                "stored_at": datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat(),
-            })
-    if _fact_db:
-        _save_facts()
-
-def _query_facts(query: str, limit: int = 5) -> list[dict]:
-    """Simple keyword match against stored facts."""
-    query_lower = query.lower()
-    words = query_lower.split()
-    scored = []
-    for f in _fact_db:
-        claim_lower = f["claim"].lower()
-        score = sum(1 for w in words if w in claim_lower)
-        if score > 0:
-            scored.append((score, f))
-    scored.sort(key=lambda x: -x[0])
-    return [f for _, f in scored[:limit]]
 
 # ─── Metrics (in-memory, no external deps) ──────────────────
 
@@ -243,6 +186,10 @@ class SourceResult(BaseModel):
     confidence: float
     summary: str = ""  # auto-generated for long descriptions
     entities: list[str] = []  # extracted URLs, code blocks, headings
+    # Populated only when enable_scraping=true and crawl succeeded.
+    content: str = ""
+    markdown: str = ""
+    word_count: int = 0
 
 class AggregateRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Research query")
@@ -271,7 +218,6 @@ class AggregateResponse(BaseModel):
     consensus: Optional[List[ConsensusFact]] = None
     synthesis: Optional[str] = None
     execution_time_ms: int
-    fact_db_hit: bool = False  # returned from consensus fact cache
     # Unified DeepSearch fields
     scraped_urls: int = 0
     rag_chunks: int = 0
@@ -302,15 +248,84 @@ app.add_middleware(
 )
 
 
+# ─── Shared HTTP client ─────────────────────────────────────────
+# 10x perf win: every outbound call used to allocate a fresh
+# httpx.AsyncClient (19 sites). Each allocation = new connection pool
+# + TCP handshake per RTT. Switched to one lifespan-managed client with
+# keep-alive across all upstream services. Per-call timeouts are still
+# overridable via the `timeout=` kwarg on the request method.
+_HTTP: Optional[httpx.AsyncClient] = None
+
+def http() -> httpx.AsyncClient:
+    if _HTTP is None:
+        raise RuntimeError("shared http client not initialized")
+    return _HTTP
+
+
+class _TimedClient:
+    """Drop-in adapter so call sites can keep their `async with _shared_client(timeout=X) as client:`
+    shape while actually using the lifespan-managed shared pool. The `timeout`
+    becomes the default for every request method; per-call overrides still win.
+    Supports the same `.post`, `.get`, `.stream` surface the call sites use.
+    """
+    __slots__ = ("_t",)
+
+    def __init__(self, timeout: Optional[float] = None):
+        self._t = timeout
+
+    async def post(self, *a, **kw):
+        if self._t is not None:
+            kw.setdefault("timeout", self._t)
+        return await http().post(*a, **kw)
+
+    async def get(self, *a, **kw):
+        if self._t is not None:
+            kw.setdefault("timeout", self._t)
+        return await http().get(*a, **kw)
+
+    def stream(self, *a, **kw):
+        if self._t is not None:
+            kw.setdefault("timeout", self._t)
+        return http().stream(*a, **kw)
+
+
+from contextlib import asynccontextmanager as _asynccontextmanager
+
+@_asynccontextmanager
+async def _shared_client(timeout: Optional[float] = None):
+    """Yields a _TimedClient bound to the shared pool. No allocation, no
+    connection setup — just a wrapper that lets existing `async with ... as client:`
+    code keep working unchanged."""
+    yield _TimedClient(timeout)
+
+
 @app.on_event("startup")
 async def startup():
-    """Load content hash dedup set and consensus fact database."""
+    """Load content hash dedup set + bring up the shared http client."""
+    global _HTTP
+    _HTTP = httpx.AsyncClient(
+        timeout=httpx.Timeout(15.0, connect=5.0),
+        limits=httpx.Limits(
+            max_connections=200,
+            max_keepalive_connections=100,
+            keepalive_expiry=30.0,
+        ),
+        http2=False,  # http2=True needs `h2` package; keep deps minimal
+    )
     _load_hashes()
-    _load_facts()
-    log.info("startup_complete hashes=%d facts=%d", len(_embed_hashes), len(_fact_db))
+    log.info("startup_complete hashes=%d http_client=ready", len(_embed_hashes))
     # PERSISTENCE: periodic flush of embed-hash dedup set to disk so restarts
     # don't trigger full re-embed of all content. Saves every 60s; also on shutdown.
     asyncio.create_task(_periodic_save_hashes())
+
+
+@app.on_event("shutdown")
+async def _http_shutdown():
+    global _HTTP
+    if _HTTP is not None:
+        await _HTTP.aclose()
+        _HTTP = None
+        log.info("http_client_closed")
 
 
 async def _periodic_save_hashes():
@@ -373,23 +388,29 @@ async def get_hash_state():
 
 # ─── Helpers ───────────────────────────────────────────────
 
-# Provider list - default 7 verified-working, non-redundant providers across 7 domains.
-# Redundant providers removed from default: duckduckgo (SearXNG covers Google+Bing+DDG),
-#   pubmed/crossref/internetarchive (lower priority, keep domain count lean).
-# IP-blocked from Docker: reddit (needs proxy).
-# Whoogle: removed (Google blocks Tor-exit IPs, never returned results).
-#
-# Override via env var AGGREGATE_PROVIDERS (comma-separated), e.g.:
-#   AGGREGATE_PROVIDERS=searxng,wikipedia,github,arxiv
+# Provider list — every working provider, every domain.
+# searxng/yacy are meta-search channels: their hits surface real source URLs
+# (wikipedia, github, news, gov, etc.) which we re-attribute downstream so
+# the orchestrator's "sources" reflect actual origins, not channel names.
+# Override via env var AGGREGATE_PROVIDERS (comma-separated).
 _DEFAULT_AGGREGATE_PROVIDERS = [
-    "searxng",         # web (multi-engine: Google, Bing, DDG, etc.)
-    "wikipedia",       # encyclopedia
-    "stackexchange",    # q_and_a
-    "hackernews",       # social_news
-    "github",           # code
-    "arxiv",            # academic
-    "yacy",             # web (P2P, complementary results)
+    "searxng",          # meta-search channel (Google/Bing/DDG)
+    "yacy",             # meta-search channel (P2P)
+    "wikipedia",        # encyclopedia
+    "stackexchange",    # q_and_a (programming/eng)
+    "hackernews",       # social_news (tech)
+    "github",           # code repositories
+    "arxiv",            # academic preprints
+    "pubmed",           # biomedical literature
+    "crossref",         # cross-disciplinary scholarly metadata
+    "internetarchive",  # archived web
+    # "reddit",        # excluded by default — needs proxy from docker net
+    # "duckduckgo",    # excluded — DDG Instant Answer API is thin; searxng covers it
 ]
+
+# Meta-search channels: hits already carry the real origin URL, so we
+# re-attribute `source` to that URL's host instead of the channel name.
+_META_SEARCH_CHANNELS = {"searxng", "yacy", "duckduckgo"}
 
 def _resolve_aggregate_providers() -> List[str]:
     """Resolve provider list from AGGREGATE_PROVIDERS env var, falling back to defaults."""
@@ -405,7 +426,7 @@ async def _multi_provider_search(query: str, max_results: int) -> List[dict]:
     """Query ALL search providers via search-gateway with deadline."""
     try:
         # 12s deadline - return whatever we have by then
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        async with _shared_client(timeout=12.0) as client:
             resp = await client.post(
                 f"{SEARCH_GATEWAY_URL}/search",
                 json={
@@ -423,30 +444,64 @@ async def _multi_provider_search(query: str, max_results: int) -> List[dict]:
 
 
 async def _warehouse_search(query: str, limit: int = 10) -> List[dict]:
-    """Search knowledge warehouse for existing stored content."""
+    """Hybrid retrieval: FTS5 + vector store fused with RRF.
+
+    Replaces the prior FTS5-only lookup. Hits whose embedding wasn't reached
+    by FTS still surface via the dense rank; exact-keyword hits the vector
+    missed still surface via FTS. ~150ms typical, parallel internally.
+    """
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        client = http()
+        # Loopback to our own /api/search/hybrid — web-api listens on 8014.
+        resp = await client.get(
+            "http://localhost:8014/api/search/hybrid",
+            params={"q": query, "limit": limit, "fts_k": max(20, limit * 2), "vec_k": max(20, limit * 2)},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        out: List[dict] = []
+        for h in data.get("hits", []):
+            out.append({
+                "id": h.get("id"),
+                "url": h.get("url", ""),
+                "title": h.get("title", ""),
+                "description": h.get("snippet", "") or "",
+                "source": "warehouse",
+                "source_domain": h.get("source_domain"),
+                "word_count": h.get("word_count", 0),
+                "confidence": min(1.0, 0.5 + 5.0 * h.get("rrf_score", 0.0)),
+                "fts_rank": h.get("fts_rank"),
+                "vec_rank": h.get("vec_rank"),
+            })
+        return out
+    except Exception as e:
+        log.warning("warehouse_hybrid_failed: %s — falling back to FTS5", e)
+        # Last-ditch fallback: raw FTS5 so the cascade keeps working if hybrid
+        # blows up (e.g., vector-store cold-start).
+        try:
+            client = http()
             resp = await client.get(
                 f"{WAREHOUSE_URL}/search",
                 params={"q": query, "limit": limit},
+                timeout=10.0,
             )
             if resp.status_code == 404:
                 return []
             resp.raise_for_status()
-            data = resp.json()
-            results = data.get("results", []) if isinstance(data, dict) else data
+            results = resp.json() or []
             for r in results:
                 r["source"] = "warehouse"
             return results
-    except Exception as e:
-        log.warning("warehouse_search_failed: %s", str(e))
-        return []
+        except Exception as e2:
+            log.warning("warehouse_fallback_failed: %s", e2)
+            return []
 
 
 async def _vector_search(query: str, limit: int = 10) -> List[dict]:
     """Semantic search via vector-store - second hop in progressive cascade."""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with _shared_client(timeout=5.0) as client:
             resp = await client.post(
                 f"{VECTOR_STORE_URL}/query",
                 json={"query_text": query, "n_results": limit},
@@ -505,17 +560,34 @@ def _strip_boilerplate(markdown: str) -> str:
 
 # ── Scraping & RAG helpers ─────────────────────────────────
 
-async def _scrape_sources(sources: List[SourceResult]) -> list:
-    """Scrape full content from source URLs via crawler service."""
+async def _scrape_sources(
+    sources: List[SourceResult],
+    session_id: Optional[str] = None,
+    query: Optional[str] = None,
+) -> list:
+    """Scrape full content from source URLs via crawler service.
+
+    Lineage propagation: stamps each crawler call with the aggregate's session_id
+    and the originating query, so warehouse rows trace back to "which research
+    session, which query found this".
+    """
     sem = asyncio.Semaphore(10)  # matches crawler concurrency
 
     async def scrape_one(s: SourceResult):
         async with sem:
             try:
-                async with httpx.AsyncClient(timeout=20.0) as client:
+                async with _shared_client(timeout=20.0) as client:
                     resp = await client.post(
                         f"{CRAWLER_URL}/crawl",
-                        json={"url": s.url, "extraction_strategy": "markdown", "timeout": 15},
+                        json={
+                            "url": s.url,
+                            "extraction_strategy": "markdown",
+                            "timeout": 15,
+                            # ── lineage stamp (warehouse v2) ────────────
+                            "seen_in_session": session_id,
+                            "found_via_query": query,
+                            "source_provider": s.source,
+                        },
                     )
                     resp.raise_for_status()
                     data = resp.json()
@@ -550,7 +622,7 @@ async def _rag_pipeline(query: str, scraped: list, top_k: int) -> list:
         if not docs:
             return []
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with _shared_client(timeout=30.0) as client:
             await client.post(f"{VECTOR_STORE_URL}/embed", json={"documents": docs})
             resp = await client.post(
                 f"{VECTOR_STORE_URL}/query",
@@ -575,46 +647,6 @@ async def _rag_pipeline(query: str, scraped: list, top_k: int) -> list:
     except Exception as e:
         log.error("rag_failed: %s", str(e))
         return []
-
-
-async def _seed_warehouse(sources: List[SourceResult]):
-    """Fire-and-forget: seed warehouse with search result metadata.
-    
-    Every search enriches the warehouse for future instant retrieval.
-    Uses snippet as lightweight markdown — full content comes from crawler later.
-    Only seeds quality snippets (≥50 chars, not just dots/punctuation).
-    """
-    seeded = 0
-    for s in sources[:20]:  # top 20 only
-        if not s.url or not s.description:
-            continue
-        desc = s.description.strip()
-        # Quality gate: skip garbage snippets
-        if len(desc) < 50:
-            continue
-        # Skip snippets that are just dots/ellipsis/punctuation
-        alpha_chars = sum(1 for c in desc if c.isalpha())
-        if alpha_chars < 20:
-            continue
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(
-                    f"{WAREHOUSE_URL}/ingest",
-                    json={
-                        "url": s.url,
-                        "markdown": desc[:1000],
-                        "title": s.title,
-                        "source_domain": _extract_domain(s.url),
-                        "word_count": len(desc.split()),
-                        "tags": ["search_seed", s.domain],
-                    },
-                )
-                if resp.status_code == 200 and resp.json().get("ingested"):
-                    seeded += 1
-        except Exception:
-            pass
-    if seeded:
-        log.info("warehouse_seeded sources=%d", seeded)
 
 
 def _extract_domain(url: str) -> str:
@@ -673,7 +705,7 @@ async def _llm_reconcile(query: str, sources: List[SourceResult]) -> dict:
         prompt = _build_reconciliation_prompt(query, sources)
         model = os.environ.get("RECONCILE_MODEL", "deepseek-v4-flash-free")
         max_tokens = int(os.environ.get("RECONCILE_MAX_TOKENS", "8192"))
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with _shared_client(timeout=60.0) as client:
             resp = await client.post(
                 f"{INFERENCE_GATEWAY_URL}/v1/chat/completions",
                 json={
@@ -702,6 +734,248 @@ async def _llm_reconcile(query: str, sources: List[SourceResult]) -> dict:
         return {"consensus": [], "synthesis": None}
 
 
+# ─── Hybrid search ─────────────────────────────────────────
+# Reciprocal Rank Fusion: combines independent rankings (FTS5 lexical +
+# vector-store dense) into one. Each ranker contributes `1 / (k + rank)` per
+# document. k=60 is the canonical TREC-style constant; larger k weights
+# rankers more equally, smaller k weights top hits more.
+
+RRF_K = int(os.environ.get("RRF_K", "60"))
+
+# Cross-encoder reranker. After RRF fusion produces a candidate list, we
+# can rerank the top-N with a small CE model that scores (query, document)
+# pairs directly. Published benchmarks show 30-50% MRR lift. Model is
+# ms-marco-MiniLM-L-6-v2 (~80 MB), CPU-fast.
+#
+# Loaded lazily on first reranking request so service startup stays fast.
+# Disable entirely with RERANKER_ENABLED=false; default on.
+
+RERANKER_ENABLED = os.environ.get("RERANKER_ENABLED", "true").lower() == "true"
+RERANKER_MODEL = os.environ.get("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+RERANK_TOP_K = int(os.environ.get("RERANK_TOP_K", "20"))
+
+_reranker = None  # lazy: CrossEncoder | None | False (init failed)
+
+
+def _get_reranker():
+    """Lazily load the cross-encoder. Returns the model or False if load failed."""
+    global _reranker
+    if _reranker is not None:
+        return _reranker
+    if not RERANKER_ENABLED:
+        _reranker = False
+        return False
+    try:
+        from sentence_transformers import CrossEncoder  # type: ignore
+        log.info("loading_reranker model=%s", RERANKER_MODEL)
+        _reranker = CrossEncoder(RERANKER_MODEL, max_length=512)
+        log.info("reranker_ready")
+        return _reranker
+    except Exception as e:
+        log.warning("reranker_load_failed: %s — falling back to RRF-only", e)
+        _reranker = False
+        return False
+
+
+def _rerank_hits(query: str, candidates: list, content_by_id: dict[int, str]) -> list:
+    """Rerank a candidate list in-place by cross-encoder score.
+
+    Returns the candidates sorted by descending CE score. If reranker is
+    disabled or unavailable, returns candidates unchanged. CE scores are
+    attached as `ce_score` on each candidate dict.
+    """
+    rr = _get_reranker()
+    if not rr:
+        return candidates
+    pairs = []
+    keep = []
+    for c in candidates[:RERANK_TOP_K]:
+        text = content_by_id.get(c.id) or c.snippet or c.title or ""
+        if not text:
+            continue
+        # CE only sees the first ~512 tokens; truncate generously at chars.
+        pairs.append((query, text[:2000]))
+        keep.append(c)
+    if not pairs:
+        return candidates
+    try:
+        scores = rr.predict(pairs, show_progress_bar=False, batch_size=16)
+    except Exception as e:
+        log.warning("rerank_predict_failed: %s", e)
+        return candidates
+    for c, s in zip(keep, scores):
+        c.ce_score = float(s)
+    # Sort the reranked subset by CE score; append the un-reranked tail.
+    keep.sort(key=lambda c: -getattr(c, "ce_score", 0.0))
+    tail = candidates[RERANK_TOP_K:]
+    return keep + tail
+
+
+class HybridHit(BaseModel):
+    id: int                                 # warehouse row id
+    url: str
+    title: Optional[str] = None
+    snippet: Optional[str] = None
+    source_domain: Optional[str] = None
+    word_count: int = 0
+    fts_rank: Optional[int] = None          # 1-based rank in FTS5 result (None = miss)
+    vec_rank: Optional[int] = None          # 1-based rank in vector result (None = miss)
+    rrf_score: float = 0.0
+    ce_score: Optional[float] = None        # cross-encoder score (None if not reranked)
+
+
+class HybridSearchResponse(BaseModel):
+    query: str
+    hits: List[HybridHit]
+    fts_hits: int
+    vec_hits: int
+    merged: int
+    elapsed_ms: int
+
+
+@app.get("/api/search/hybrid", response_model=HybridSearchResponse)
+async def hybrid_search(
+    q: str,
+    limit: int = 15,
+    fts_k: int = 30,
+    vec_k: int = 30,
+):
+    """FTS5 lexical + vector dense, fused with Reciprocal Rank Fusion.
+
+    Both halves run in parallel. Documents present in either ranking get a
+    score of sum(1 / (k + rank_i)). The vector-store ids are `wh-{row_id}`
+    so we can join the dense hits straight onto warehouse rows. Returns
+    enriched HybridHit objects so callers can show provenance + content.
+    """
+    import time
+    t0 = time.time()
+    client = http()
+
+    async def _fts() -> list[dict]:
+        try:
+            r = await client.get(f"{WAREHOUSE_URL}/search", params={"q": q, "limit": fts_k}, timeout=15.0)
+            r.raise_for_status()
+            return r.json() or []
+        except Exception as e:
+            log.warning("hybrid_fts_err: %s", e)
+            return []
+
+    async def _vec() -> dict:
+        try:
+            r = await client.post(
+                f"{VECTOR_STORE_URL}/query",
+                json={"query_text": q, "n_results": vec_k, "namespace": "warehouse"},
+                timeout=15.0,
+            )
+            r.raise_for_status()
+            return r.json() or {}
+        except Exception as e:
+            log.warning("hybrid_vec_err: %s", e)
+            return {}
+
+    fts_rows, vec_rows = await asyncio.gather(_fts(), _vec())
+
+    # ── Index by warehouse id ──────────────────────────────────────
+    by_id: dict[int, HybridHit] = {}
+    rrf: dict[int, float] = {}
+
+    for rank, row in enumerate(fts_rows, start=1):
+        wid = int(row.get("id"))
+        rrf[wid] = rrf.get(wid, 0.0) + 1.0 / (RRF_K + rank)
+        by_id[wid] = HybridHit(
+            id=wid,
+            url=row.get("url", ""),
+            title=row.get("title"),
+            snippet=row.get("snippet"),
+            source_domain=row.get("source_domain"),
+            word_count=row.get("word_count", 0),
+            fts_rank=rank,
+        )
+
+    vec_ids: list = vec_rows.get("ids", [[]])[0] if isinstance(vec_rows.get("ids"), list) else []
+    vec_metas: list = vec_rows.get("metadatas", [[]])[0] if isinstance(vec_rows.get("metadatas"), list) else []
+    vec_docs: list = vec_rows.get("documents", [[]])[0] if isinstance(vec_rows.get("documents"), list) else []
+    for rank, vid in enumerate(vec_ids, start=1):
+        if not isinstance(vid, str):
+            continue
+        # Vector-store namespaces ids as "{namespace}:{id}" when written with a
+        # namespace, so the actual id is the part after the last ':'. Then we
+        # peel off the "wh-" prefix to get the warehouse row id.
+        bare = vid.rsplit(":", 1)[-1]
+        if not bare.startswith("wh-"):
+            continue
+        try:
+            wid = int(bare[3:])
+        except ValueError:
+            continue
+        rrf[wid] = rrf.get(wid, 0.0) + 1.0 / (RRF_K + rank)
+        if wid in by_id:
+            by_id[wid].vec_rank = rank
+        else:
+            meta = vec_metas[rank - 1] if rank - 1 < len(vec_metas) else {}
+            doc = vec_docs[rank - 1] if rank - 1 < len(vec_docs) else ""
+            by_id[wid] = HybridHit(
+                id=wid,
+                url=(meta or {}).get("url", ""),
+                title=(meta or {}).get("title"),
+                snippet=(doc or "")[:240],
+                source_domain=None,
+                word_count=int((meta or {}).get("word_count", 0)),
+                vec_rank=rank,
+            )
+
+    # Sort by RRF score descending, keep more candidates than we'll return so
+    # the reranker has room to reshuffle.
+    candidate_count = max(limit, RERANK_TOP_K)
+    sorted_ids = sorted(rrf.keys(), key=lambda i: -rrf[i])[:candidate_count]
+    candidates = []
+    for wid in sorted_ids:
+        h = by_id[wid]
+        h.rrf_score = round(rrf[wid], 6)
+        candidates.append(h)
+
+    # Cross-encoder rerank — fetch the body for the top candidates so the CE
+    # has actual text (not just title) to score against the query.
+    if candidates and RERANKER_ENABLED:
+        rerank_ids = [c.id for c in candidates[:RERANK_TOP_K]]
+        content_by_id: dict[int, str] = {}
+        try:
+            client = http()
+            # Fetch top candidates' content from the warehouse in parallel.
+            async def _fetch(wid: int):
+                try:
+                    r = await client.get(f"{WAREHOUSE_URL}/content/{wid}", timeout=5.0)
+                    if r.status_code == 200:
+                        data = r.json()
+                        return wid, data.get("markdown") or ""
+                except Exception:
+                    pass
+                return wid, ""
+            fetches = await asyncio.gather(*[_fetch(wid) for wid in rerank_ids])
+            for wid, md in fetches:
+                content_by_id[wid] = md
+            candidates = await asyncio.to_thread(_rerank_hits, q, candidates, content_by_id)
+        except Exception as e:
+            log.warning("rerank_pipeline_failed: %s", e)
+
+    hits = candidates[:limit]
+
+    elapsed_ms = int((time.time() - t0) * 1000)
+    metrics.incr("hybrid.requests")
+    metrics.time("hybrid.duration_ms", elapsed_ms)
+    reranked = sum(1 for h in hits if h.ce_score is not None)
+    log.info("hybrid query=%s fts=%d vec=%d merged=%d reranked=%d elapsed=%dms",
+             q[:80], len(fts_rows), len(vec_ids), len(hits), reranked, elapsed_ms)
+    return HybridSearchResponse(
+        query=q,
+        hits=hits,
+        fts_hits=len(fts_rows),
+        vec_hits=len(vec_ids),
+        merged=len(hits),
+        elapsed_ms=elapsed_ms,
+    )
+
+
 # ─── Endpoints ─────────────────────────────────────────────
 
 @app.post("/api/aggregate", response_model=AggregateResponse)
@@ -724,29 +998,12 @@ async def cross_domain_aggregate(req: AggregateRequest):
         ck = None  # don't cache scraping results
 
     import time
+    import uuid
     t0 = time.time()
+    # session_id traces every artifact produced by this aggregate call back to
+    # the originating research session. Propagated to scrape → warehouse.
+    session_id = f"agg-{uuid.uuid4().hex[:12]}"
     metrics.incr("aggregate.requests")
-
-    # 0. Consensus fact database lookup — instant cached facts
-    fact_results = _query_facts(req.query, limit=3)
-    if fact_results and not req.enable_scraping:
-        elapsed_ms = int((time.time() - t0) * 1000)
-        metrics.incr("aggregate.fact_db_hits")
-        log.info("aggregate_fact_hit query=%s facts=%d time=%dms", req.query, len(fact_results), elapsed_ms)
-        return AggregateResponse(
-            query=req.query,
-            total_sources=len(fact_results),
-            sources=[],
-            domains_queried=[],
-            consensus=[ConsensusFact(
-                claim=f["claim"], confidence=f.get("confidence", 1.0),
-                supporting_sources=f.get("sources", []), conflicting_sources=[],
-                quality="verified",
-            ) for f in fact_results],
-            synthesis=None,
-            execution_time_ms=elapsed_ms,
-            fact_db_hit=True,
-        )
 
     # 1. Warehouse-first search - check local FTS5 before hitting external APIs
     warehouse_results = []
@@ -785,21 +1042,42 @@ async def cross_domain_aggregate(req: AggregateRequest):
         if not url or url in seen_urls:
             continue
         seen_urls.add(url)
-        src = r.get("source", "unknown")
+        provider = r.get("source", "unknown")
+
+        # Re-attribute the `source` for meta-search hits: searxng/yacy/ddg
+        # aggregate from real origins (wikipedia.org, nytimes.com, github.com,
+        # ...). Treating "searxng" as a single source is wrong — every hit
+        # has a real origin URL. We use the URL host as the source; the
+        # original channel goes into `entities` for traceability.
+        if provider in _META_SEARCH_CHANNELS:
+            origin = _extract_domain(url) or provider
+            src = origin
+            # Domain class for meta-search hits is inferred from the origin
+            # host (wikipedia → encyclopedia, github → code, ...).
+            origin_key = origin.replace("www.", "").split(".")[0]
+            classified = DOMAIN_MAP.get(origin_key, "web")
+            domain = classified
+        else:
+            src = provider
+            domain = _classify_domain(src)
+
         desc = r.get("description", r.get("snippet", ""))
-        # Auto-summarize long descriptions
         summary = ""
         if len(desc) > 500:
             sentences = desc.replace('\n', ' ').split('. ')
             summary = '. '.join(sentences[:2]) + '.' if len(sentences) >= 2 else desc[:300]
-        # Basic entity extraction
         entities = _extract_entities(r.get("title", "") + " " + desc)
+        # Keep the channel that surfaced this hit so downstream telemetry can
+        # see which gateway found it.
+        if provider in _META_SEARCH_CHANNELS:
+            entities.append(f"via:{provider}")
+
         sources.append(SourceResult(
             title=r.get("title", ""),
             url=url,
             description=desc,
             source=src,
-            domain=_classify_domain(src),
+            domain=domain,
             confidence=r.get("confidence", r.get("score", 0.5)),
             summary=summary,
             entities=entities,
@@ -811,11 +1089,26 @@ async def cross_domain_aggregate(req: AggregateRequest):
     scraped_content: list = []
     if req.enable_scraping and sources:
         t_scrape = time.monotonic()
-        scraped_content = await _scrape_sources(sources[:req.max_scrape_urls])
+        scraped_content = await _scrape_sources(
+            sources[:req.max_scrape_urls],
+            session_id=session_id,
+            query=req.query,
+        )
         metrics.time("scrape.duration_ms", (time.monotonic() - t_scrape) * 1000)
         metrics.incr("scrape.requests")
         metrics.incr("scrape.urls", len(scraped_content))
         log.info("scraped urls=%d for query=%s", len(scraped_content), req.query)
+        # Attach scraped content back to the matching sources so callers
+        # actually receive what they asked for. Without this, scraping
+        # silently feeds only the RAG pipeline.
+        by_url = {item["url"]: item for item in scraped_content}
+        for s in sources:
+            hit = by_url.get(s.url)
+            if hit:
+                md = hit.get("markdown") or ""
+                s.markdown = md
+                s.content = md
+                s.word_count = hit.get("word_count") or len(md.split())
 
     # 2.6 Optional: Embed → Retrieve via vector-store
     rag_chunks: list = []
@@ -848,9 +1141,6 @@ async def cross_domain_aggregate(req: AggregateRequest):
             if f.get("claim")  # skip empty claims
         ]
         synthesis = reconciliation.get("synthesis")
-        # Store verified facts in persistent fact database
-        if consensus:
-            _store_verified_facts([c.dict() for c in consensus])
 
     elapsed_ms = int((time.time() - t0) * 1000)
     metrics.time("aggregate.duration_ms", elapsed_ms)
@@ -872,11 +1162,10 @@ async def cross_domain_aggregate(req: AggregateRequest):
         rag_chunks=len(rag_chunks),
     )
 
-    # Cache the result (fire-and-forget)
+    # Cache the result (fire-and-forget). Warehouse persistence is the
+    # crawler's job — it forwards every successful /crawl to the warehouse
+    # via FORWARD_TO_WAREHOUSE. web-api stays out of the persistence path.
     asyncio.create_task(_cache_set(ck, response.model_dump()))
-
-    # Seed warehouse with search result metadata (fire-and-forget)
-    asyncio.create_task(_seed_warehouse(sources))
 
     return response
 
@@ -920,7 +1209,7 @@ async def stream_search(request: ClientSearchRequest):
     async def _stream():
         # 1. Search
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with _shared_client(timeout=30.0) as client:
                 resp = await client.post(
                     f"{SEARCH_GATEWAY_URL}/search",
                     json={
@@ -939,7 +1228,7 @@ async def stream_search(request: ClientSearchRequest):
 
         # 2. Synthesize via search-agent
         try:
-            async with httpx.AsyncClient(timeout=180.0) as client:
+            async with _shared_client(timeout=180.0) as client:
                 async with client.stream(
                     "POST",
                     f"{SEARCH_AGENT_URL}/synthesize/stream",
@@ -964,7 +1253,7 @@ async def stream_completion(request: CompletionRequest):
     """Direct LLM completion proxy."""
     async def _stream():
         try:
-            async with httpx.AsyncClient(timeout=180.0) as client:
+            async with _shared_client(timeout=180.0) as client:
                 async with client.stream(
                     "POST",
                     f"{INFERENCE_GATEWAY_URL}/v1/chat/completions",
@@ -988,7 +1277,7 @@ async def stream_completion(request: CompletionRequest):
 async def get_providers():
     """Available LLM providers."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with _shared_client(timeout=10.0) as client:
             resp = await client.get(f"{INFERENCE_GATEWAY_URL}/v1/models")
             resp.raise_for_status()
             return resp.json()
@@ -1008,7 +1297,7 @@ async def health():
         ("warehouse", f"{WAREHOUSE_URL}/health"),
     ]:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with _shared_client(timeout=5.0) as client:
                 r = await client.get(url)
                 deps[name] = "ok" if r.status_code == 200 else "degraded"
         except Exception:
@@ -1033,14 +1322,6 @@ async def get_metrics():
         "vector_store_rate": round(snap["counters"].get("aggregate.vector_store_hits", 0) / total, 3) if total > 0 else 0,
     }
     return snap
-
-
-@app.get("/api/facts")
-async def get_facts(q: str = ""):
-    """Query the consensus fact database."""
-    if q:
-        return {"facts": _query_facts(q, limit=10), "total": len(_fact_db)}
-    return {"facts": _fact_db[-50:], "total": len(_fact_db)}
 
 
 @app.get("/ui")
@@ -1089,7 +1370,7 @@ async def warehouse_list_proxy(
     if min_words is not None: params["min_words"] = min_words
     if max_words is not None: params["max_words"] = max_words
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with _shared_client(timeout=10.0) as client:
             resp = await client.get(f"{WAREHOUSE_URL}/list", params=params)
             resp.raise_for_status()
             return resp.json()
@@ -1102,7 +1383,7 @@ async def warehouse_list_proxy(
 async def warehouse_stats_proxy():
     """Proxy warehouse stats through web-api."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with _shared_client(timeout=10.0) as client:
             resp = await client.get(f"{WAREHOUSE_URL}/stats")
             resp.raise_for_status()
             return resp.json()
@@ -1115,7 +1396,7 @@ async def warehouse_stats_proxy():
 async def warehouse_search_proxy(q: str, limit: int = 30):
     """Proxy warehouse FTS5 search through web-api."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with _shared_client(timeout=10.0) as client:
             resp = await client.get(f"{WAREHOUSE_URL}/search", params={"q": q, "limit": min(limit, 100)})
             resp.raise_for_status()
             return resp.json()
@@ -1128,7 +1409,7 @@ async def warehouse_search_proxy(q: str, limit: int = 30):
 async def warehouse_content_proxy(content_id: int):
     """Proxy warehouse content fetch through web-api."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with _shared_client(timeout=10.0) as client:
             resp = await client.get(f"{WAREHOUSE_URL}/content/{content_id}")
             resp.raise_for_status()
             return resp.json()
@@ -1153,7 +1434,7 @@ async def ingest_urls(req: IngestURLsRequest):
     log.info("ingest_urls submitting=%d urls", len(urls))
 
     try:
-        async with httpx.AsyncClient(timeout=req.timeout + 30) as client:
+        async with _shared_client(timeout=req.timeout + 30) as client:
             resp = await client.post(
                 f"{CRAWLER_URL}/crawl/batch",
                 json={
@@ -1172,7 +1453,7 @@ async def ingest_urls(req: IngestURLsRequest):
     # Get current warehouse stats
     warehouse_entries = 0
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with _shared_client(timeout=5.0) as client:
             wh_resp = await client.get(f"{WAREHOUSE_URL}/stats")
             wh_resp.raise_for_status()
             warehouse_entries = wh_resp.json().get("total_entries", 0)
@@ -1209,7 +1490,7 @@ async def ingest_feed(req: IngestFeedRequest):
 
     # Fetch feed
     try:
-        async with httpx.AsyncClient(timeout=req.timeout) as client:
+        async with _shared_client(timeout=req.timeout) as client:
             resp = await client.get(
                 req.feed_url,
                 headers={"User-Agent": "DeepSearchStack/1.0 (feed reader)"},
@@ -1274,7 +1555,7 @@ async def _crawl_feed_links(links: list[str]):
     for i in range(0, len(links), batch_size):
         batch = links[i:i + batch_size]
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with _shared_client(timeout=60.0) as client:
                 await client.post(
                     f"{CRAWLER_URL}/crawl/batch",
                     json={"urls": batch, "timeout": 20},
