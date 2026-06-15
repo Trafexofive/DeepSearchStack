@@ -822,14 +822,59 @@ async def _start_watch_loop():
 # ─── Watch endpoints ─────────────────────────────────────────────────────
 
 class AddWatchRequest(BaseModel):
-    feed_url: str = Field(..., min_length=1, max_length=2048)
+    # http(s) URL only — the watcher uses HTTP conditional GET (ETag /
+    # Last-Modified) which is meaningless for other schemes.
+    feed_url: str = Field(..., min_length=8, max_length=2048,
+                          pattern=r"^https?://")
     name: Optional[str] = None
     interval_sec: int = Field(default=WATCH_DEFAULT_INTERVAL_SEC, ge=60, le=86400)
 
 
+async def _validate_feed_url(url: str) -> tuple[bool, str]:
+    """Fetch + parse the URL. Returns (ok, reason).
+
+    Accepts when feedparser finds at least one entry OR when the body
+    declares itself as RSS/Atom in feed.bozo_exception-free state. This
+    catches the "I gave you a homepage HTML" case but doesn't false-
+    negative on feeds that are momentarily empty.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as c:
+            r = await c.get(url, headers={"User-Agent": "dss-warehouse/1.0 (feed-probe)"})
+            if r.status_code >= 400:
+                return False, f"http_{r.status_code}"
+            body = r.text
+    except Exception as e:
+        return False, f"fetch_failed:{type(e).__name__}"
+
+    try:
+        import feedparser as _fp
+        parsed = _fp.parse(body)
+        # Two ways to be a "real" feed: entries present, or the feed
+        # type declares itself even if empty (new podcast, fresh blog).
+        has_entries = bool(parsed.entries)
+        is_feedish = bool(parsed.get("version")) and parsed.get("version") not in {"", None}
+        if has_entries or is_feedish:
+            return True, "ok"
+        return False, "not_a_feed:no_entries_no_version"
+    except Exception as e:
+        return False, f"parse_failed:{type(e).__name__}"
+
+
 @app.post("/watch/feeds")
 async def add_feed(req: AddWatchRequest):
-    """Register a new RSS/Atom feed for periodic ingestion."""
+    """Register a new RSS/Atom feed for periodic ingestion.
+
+    Probe-tests the URL: a watcher that swallows arbitrary URLs fills
+    up with dead entries that the poll loop wastes cycles on forever.
+    A 400 here is better than thousands of 404s at 30s intervals.
+    """
+    ok, reason = await _validate_feed_url(req.feed_url)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail=f"feed_url did not validate as an RSS/Atom feed: {reason}",
+        )
     now = time.time()
     try:
         with _watch_conn() as conn:
@@ -1470,10 +1515,13 @@ async def ingest(req: IngestRequest):
             new_id = cursor.lastrowid
             log.info("ingest_revision url=%s id=%s rev=%d supersedes=%d sha=%s",
                      req.url[:100], new_id, prior_rev + 1, prior_id, content_sha[:12])
-            # Fire-and-forget embed of the new revision.
+            # Embed the new revision AND drop the prior revision's embedding —
+            # without the delete, hybrid retrieval keeps surfacing the stale
+            # revision under the same URL (BUG-13).
             asyncio.create_task(_embed_to_vector_store(
                 new_id, req.url, req.title, md, req.word_count, req.extractor
             ))
+            asyncio.create_task(_vector_delete(prior_id))
             return IngestResponse(
                 id=new_id, url=req.url, ingested=True, cached=False,
                 action="revision", revision=prior_rev + 1,

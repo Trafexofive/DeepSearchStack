@@ -1272,10 +1272,27 @@ async def aggregate_stream(req: AggregateRequest):
         wh = []
         if req.include_warehouse:
             wh = await _warehouse_search(req.query, req.max_results)
-        wh_sources = [{"title":r.get("title",""),"url":r.get("url",""),
-            "description":r.get("snippet","")[:500],"source":"warehouse",
-            "domain":r.get("source_domain",""),"confidence":0.9} for r in wh]
-        yield f"data: {json.dumps({'type':'warehouse','sources':wh_sources,'count':len(wh),'time_ms':int((time.time()-t_wh)*1000)})}\n\n"
+        # URL-dedup before serialization. The streaming endpoint used to
+        # ship duplicates whenever warehouse stored a current+superseded
+        # row pair under the same URL (BUG-13 root cause is upstream; this
+        # is defense-in-depth so a future data slip can't leak duplicate
+        # citations to the user).
+        seen_urls: set = set()
+        wh_sources: list = []
+        for r in wh:
+            u = r.get("url", "")
+            if not u or u in seen_urls:
+                continue
+            seen_urls.add(u)
+            wh_sources.append({
+                "title": r.get("title", ""),
+                "url": u,
+                "description": r.get("snippet", "")[:500],
+                "source": "warehouse",
+                "domain": r.get("source_domain", ""),
+                "confidence": 0.9,
+            })
+        yield f"data: {json.dumps({'type':'warehouse','sources':wh_sources,'count':len(wh_sources),'time_ms':int((time.time()-t_wh)*1000)})}\n\n"
         
         # 2. External (only if needed)
         if len(wh) < 3:
