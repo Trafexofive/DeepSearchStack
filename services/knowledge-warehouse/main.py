@@ -907,11 +907,121 @@ async def _start_vec_client():
     log.info("vector_client_ready url=%s", VECTOR_STORE_URL)
 
 
+_embed_retry_task: Optional[asyncio.Task] = None
+
+
+@app.on_event("startup")
+async def _start_embed_retry_loop():
+    global _embed_retry_task
+    _embed_retry_task = asyncio.create_task(_embed_retry_loop())
+
+
+@app.on_event("shutdown")
+async def _stop_embed_retry_loop():
+    global _embed_retry_task
+    if _embed_retry_task is not None:
+        _embed_retry_task.cancel()
+        try:
+            await _embed_retry_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
 @app.on_event("shutdown")
 async def _stop_vec_client():
     global _vec_client
     if _vec_client is not None:
         await _vec_client.aclose()
+
+
+# ─── Embed outbox (BUG-10) ───────────────────────────────────────────
+# When vector-store is unreachable or returns non-200, the embed call
+# previously fire-and-forget-logged the failure. The warehouse row was
+# then permanently absent from the hybrid dense index. We now persist
+# failed embeds to a SQLite outbox and drain it from a background
+# worker — same shape as the crawler's pending_forwards.db pattern.
+_EMBED_OUTBOX_DB = DATA_DIR / "pending_embeds.db"
+_EMBED_RETRY_INTERVAL_SEC = int(os.environ.get("EMBED_RETRY_INTERVAL_SEC", "30"))
+_EMBED_MAX_ATTEMPTS = int(os.environ.get("EMBED_MAX_ATTEMPTS", "12"))
+_EMBED_DRAIN_BATCH = int(os.environ.get("EMBED_DRAIN_BATCH", "25"))
+
+
+def _init_embed_outbox() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(_EMBED_OUTBOX_DB)) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pending_embeds (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                row_id INTEGER NOT NULL,
+                url TEXT NOT NULL,
+                title TEXT DEFAULT '',
+                markdown TEXT NOT NULL,
+                word_count INTEGER DEFAULT 0,
+                extractor TEXT DEFAULT '',
+                attempts INTEGER DEFAULT 0,
+                last_attempt REAL DEFAULT 0,
+                created_at REAL NOT NULL,
+                UNIQUE(row_id)
+            )
+        """)
+        conn.commit()
+
+
+_init_embed_outbox()
+
+
+def _store_pending_embed(row_id: int, url: str, title: Optional[str],
+                         markdown: str, word_count: int,
+                         extractor: Optional[str]) -> None:
+    """Persist a failed embed to the outbox. Idempotent on row_id —
+    a re-ingest of the same row overwrites the prior payload so we
+    always retry the freshest content."""
+    try:
+        with sqlite3.connect(str(_EMBED_OUTBOX_DB)) as conn:
+            conn.execute(
+                """
+                INSERT INTO pending_embeds (row_id, url, title, markdown, word_count, extractor, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(row_id) DO UPDATE SET
+                    url=excluded.url,
+                    title=excluded.title,
+                    markdown=excluded.markdown,
+                    word_count=excluded.word_count,
+                    extractor=excluded.extractor,
+                    attempts=0,
+                    created_at=excluded.created_at
+                """,
+                (row_id, url, title or "", markdown, word_count, extractor or "", time.time()),
+            )
+            conn.commit()
+    except Exception as e:
+        log.warning("embed_outbox_persist_failed row_id=%s err=%s", row_id, e)
+
+
+def _pending_embeds_count() -> int:
+    try:
+        with sqlite3.connect(str(_EMBED_OUTBOX_DB)) as conn:
+            return conn.execute("SELECT COUNT(*) FROM pending_embeds").fetchone()[0]
+    except Exception:
+        return -1
+
+
+async def _try_post_embed(payload: dict) -> bool:
+    """Single embed attempt. Returns True on 200, False otherwise.
+
+    Uses _vec_client when available, else builds a one-shot client so
+    the retry loop can run before _start_vec_client fires.
+    """
+    try:
+        if _vec_client is not None:
+            r = await _vec_client.post(f"{VECTOR_STORE_URL}/embed", json=payload)
+        else:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                r = await c.post(f"{VECTOR_STORE_URL}/embed", json=payload)
+        return r.status_code == 200
+    except Exception:
+        return False
 
 
 async def _embed_to_vector_store(row_id: int, url: str, title: Optional[str],
@@ -920,7 +1030,9 @@ async def _embed_to_vector_store(row_id: int, url: str, title: Optional[str],
     """Fire-and-forget embed of a warehouse row into vector-store.
 
     Skipped for snippets / non-body rows (word_count < MIN_EMBED_WORDS) and
-    for extractors we don't trust as semantic ground truth.
+    for extractors we don't trust as semantic ground truth. On HTTP/network
+    failure the payload is persisted to the embed outbox and retried from
+    the background worker — see _embed_retry_loop().
     """
     if word_count < MIN_EMBED_WORDS:
         return
@@ -928,8 +1040,6 @@ async def _embed_to_vector_store(row_id: int, url: str, title: Optional[str],
         return
     if not markdown:
         return
-    # The vector-store id is `wh-{row_id}` so a hybrid result can map back to
-    # the warehouse row trivially.
     payload = {
         "documents": [{
             "id": f"wh-{row_id}",
@@ -944,17 +1054,68 @@ async def _embed_to_vector_store(row_id: int, url: str, title: Optional[str],
         }],
         "namespace": "warehouse",
     }
-    try:
-        if _vec_client is None:
-            return
-        r = await _vec_client.post(f"{VECTOR_STORE_URL}/embed", json=payload)
-        if r.status_code != 200:
-            log.warning("embed_fail id=%d status=%d body=%s",
-                        row_id, r.status_code, r.text[:200])
-        else:
-            log.info("embed_ok id=wh-%d words=%d", row_id, word_count)
-    except Exception as e:
-        log.warning("embed_err id=%d err=%s", row_id, e)
+    ok = await _try_post_embed(payload)
+    if ok:
+        log.info("embed_ok id=wh-%d words=%d", row_id, word_count)
+        return
+    log.warning("embed_failed id=wh-%d — queued for retry", row_id)
+    _store_pending_embed(row_id, url, title, markdown[:EMBED_TEXT_CAP],
+                        word_count, extractor)
+
+
+async def _embed_retry_loop() -> None:
+    """Background drainer for the embed outbox.
+
+    Wakes every EMBED_RETRY_INTERVAL_SEC, pulls up to EMBED_DRAIN_BATCH
+    rows under the attempt ceiling, retries each. Successful → row
+    deleted. Failed → attempts++. Rows that hit EMBED_MAX_ATTEMPTS stay
+    in the outbox flagged for operator attention (visible via /stats).
+    """
+    log.info("embed_retry_loop_starting interval=%ds max_attempts=%d batch=%d",
+             _EMBED_RETRY_INTERVAL_SEC, _EMBED_MAX_ATTEMPTS, _EMBED_DRAIN_BATCH)
+    while True:
+        await asyncio.sleep(_EMBED_RETRY_INTERVAL_SEC)
+        try:
+            with sqlite3.connect(str(_EMBED_OUTBOX_DB)) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """SELECT id, row_id, url, title, markdown, word_count, extractor
+                       FROM pending_embeds
+                       WHERE attempts < ?
+                       ORDER BY id LIMIT ?""",
+                    (_EMBED_MAX_ATTEMPTS, _EMBED_DRAIN_BATCH),
+                ).fetchall()
+            if not rows:
+                continue
+            for r in rows:
+                payload = {
+                    "documents": [{
+                        "id": f"wh-{r['row_id']}",
+                        "text": r["markdown"],
+                        "url": r["url"],
+                        "title": r["title"] or "",
+                        "metadata": {
+                            "warehouse_id": r["row_id"],
+                            "extractor": r["extractor"] or "unknown",
+                            "word_count": r["word_count"],
+                        },
+                    }],
+                    "namespace": "warehouse",
+                }
+                ok = await _try_post_embed(payload)
+                with sqlite3.connect(str(_EMBED_OUTBOX_DB)) as conn:
+                    if ok:
+                        conn.execute("DELETE FROM pending_embeds WHERE id = ?", (r["id"],))
+                        log.info("embed_retry_ok outbox_id=%d row_id=%d",
+                                 r["id"], r["row_id"])
+                    else:
+                        conn.execute(
+                            "UPDATE pending_embeds SET attempts = attempts + 1, last_attempt = ? WHERE id = ?",
+                            (time.time(), r["id"]),
+                        )
+                    conn.commit()
+        except Exception as e:
+            log.warning("embed_retry_loop_iter_err err=%s", e)
 
 
 # ─── Models ───────────────────────────────────────────────
@@ -1045,6 +1206,11 @@ class StatsResponse(BaseModel):
     # Quality gate (process-lifetime counters; reset on restart).
     quality_rejected_total: int = 0
     quality_rejected_by_reason: dict = {}
+    # Embed outbox depth: rows that couldn't reach vector-store on their
+    # first try and are awaiting the background retry loop. >0 = transient
+    # vector outage. Sustained high values mean the retry isn't winning —
+    # check vector-store health.
+    pending_embeds: int = 0
 
 
 # ─── Content classification (v2.3) ───────────────────────────────────────
@@ -1732,6 +1898,7 @@ async def stats():
         categories=categories,
         quality_rejected_total=_quality_rejected_total,
         quality_rejected_by_reason=dict(_quality_rejected_by_reason),
+        pending_embeds=_pending_embeds_count(),
     )
 
 
