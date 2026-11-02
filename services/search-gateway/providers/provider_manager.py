@@ -170,6 +170,34 @@ class SearchProviderManager:
             response = await client.get(url, params=params, headers=headers,
                                         timeout=request.timeout, follow_redirects=True)
             logger.info("Provider %s → %d", provider.value, response.status_code)
+
+            # ── Proxy-rotator retry for IP-blocked providers ─────────────
+            # Reddit (and some others) block server IPs. If we get a
+            # 403/429/451 on a provider that's known to IP-block, retry
+            # through the proxy-rotator service. PROXY_ROTATOR_URL env
+            # points at an HTTP proxy (Tor via Privoxy by default).
+            needs_proxy = (
+                response.status_code in (403, 429, 451)
+                and provider in {SearchProvider.REDDIT}
+            )
+            if needs_proxy:
+                proxy_url = os.environ.get("PROXY_ROTATOR_URL")
+                if proxy_url:
+                    logger.warning("provider %s status=%d — retrying via proxy %s",
+                                   provider.value, response.status_code, proxy_url)
+                    try:
+                        # httpx 0.28+: pass a single `proxy=` (was `proxies={...}`).
+                        async with httpx.AsyncClient(
+                            timeout=request.timeout + 10,
+                            proxy=proxy_url,
+                            follow_redirects=True,
+                        ) as pclient:
+                            response = await pclient.get(url, params=params, headers=headers)
+                            logger.info("Provider %s (via proxy) → %d",
+                                        provider.value, response.status_code)
+                    except Exception as e:
+                        logger.warning("proxy retry failed for %s: %s", provider.value, e)
+
             response.raise_for_status()
 
             # ── Parse ──────────────────────────────────────────────────

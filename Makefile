@@ -293,14 +293,14 @@ help:
 	@echo -e "  reboot               - down + up"
 	@echo ""
 	@echo -e "$(GREEN)SDK + TUI (DSS-specific QOL — at the bottom of this file):$(NC)"
-	@echo -e "  tui                  - Launch the DeepSearchStack TUI"
-	@echo -e "  tui-test             - Headless TUI smoke test"
-	@echo -e "  tui-screenshot       - Save TUI screenshot to svg"
-	@echo -e "  sdk-test             - Full SDK test suite (17 tests)"
+	@echo -e "  tui / tui-local      - Launch dss-tui (Go / Bubble Tea)"
+	@echo -e "  tui-test             - Go TUI integration tests"
+	@echo -e "  tui-rebuild          - Force rebuild of the Go TUI binary"
+	@echo -e "  sdk-test             - Python SDK test suite"
 	@echo -e "  sdk-test-unit        - SDK unit tests only (no stack required)"
-	@echo -e "  sdk-install          - pip install SDK + TUI deps"
+	@echo -e "  sdk-install          - pip install SDK deps"
 	@echo -e "  sdk-repl             - Drop into a Python REPL with the SDK loaded"
-	@echo -e "  curl-catalog         - List 18 models in the inference catalog"
+	@echo -e "  curl-catalog         - List models in the inference catalog"
 	@echo -e "  curl-warehouse       - GET /dss/warehouse/stats"
 	@echo -e "  curl-llm             - One-shot LLM call (default model)"
 	@echo -e "  db-shell/db-stats/db-backup  - PostgreSQL shortcuts"
@@ -309,7 +309,6 @@ help:
 	@echo -e "  shell-web/shell-llm/shell-db/...   - Per-service shell aliases (no service= typing)"
 	@echo -e "  logs-web/logs-llm/logs-agent/...   - Per-service log aliases"
 	@echo -e "  e2e                  - sdk-test + tui-test (full E2E)"
-	@echo -e "  snapshot             - tui-screenshot + versions (for bug reports)"
 	@echo ""
 	@echo -e "$(GREEN)Cleanup:$(NC)"
 	@echo -e "  clean                - Stop and remove containers"
@@ -372,40 +371,52 @@ test-restart:
 # --- SDK + TUI ----------------------------------------------------------
 
 SDK_DIR     := sdk/python
-TUI_DIR     := $(SDK_DIR)/tui
+TUI_GO_DIR  := clients/tui-go
+TUI_BIN     := $(TUI_GO_DIR)/dss-tui
+CLI_GO_DIR  := clients/cli-go
+CLI_BIN     := $(CLI_GO_DIR)/dss
 AUDIT_DOC   := docs/audit/viability-2026-06-05.md
 TODO_DOC    := docs/TODO.md
 
-tui:
+# Build the Go TUI if missing or older than its source.
+$(TUI_BIN): $(wildcard $(TUI_GO_DIR)/*.go) $(TUI_GO_DIR)/go.mod
+	@echo -e "$(BLUE)🔨 Building Go TUI$(NC)"
+	@cd $(TUI_GO_DIR) && go build -o dss-tui .
+
+tui: tui-local
+
+tui-local: $(TUI_BIN)
 	@if ! $(COMPOSE) ps --status running 2>/dev/null | grep -q web-api; then \
 		echo -e "$(RED)✖ web-api is not running. Run: make up STACK=full$(NC)"; \
 		exit 1; \
 	fi
-	@echo -e "$(CYAN)🖥️  Launching TUI in container (dss-tui)$(NC)"
-	@$(COMPOSE) --profile with-tui run --rm dss-tui
+	@echo -e "$(CYAN)🖥️  Launching dss-tui (Go / Bubble Tea)$(NC)"
+	@$(TUI_BIN) -base http://localhost:$${DSS_PORT:-8083}
 
-tui-local:
-	@if ! $(COMPOSE) ps --status running 2>/dev/null | grep -q web-api; then \
-		echo -e "$(RED)✖ web-api is not running. Run: make up STACK=full$(NC)"; \
-		exit 1; \
-	fi
-	@cd $(TUI_DIR) && python3 app.py $(TUI_FLAGS)
+tui-test: $(TUI_BIN)
+	@echo -e "$(BLUE)🧪 Running Go TUI integration tests (needs stack up)$(NC)"
+	@cd $(TUI_GO_DIR) && go test -v -timeout 120s .
 
-tui-test:
-	@echo -e "$(BLUE)🧪 Running TUI smoke test (needs stack up)$(NC)"
-	@python3 $(TUI_DIR)/test_app.py
+tui-rebuild:
+	@cd $(TUI_GO_DIR) && go build -o dss-tui .
+	@echo -e "$(GREEN)✅ rebuilt $(TUI_BIN)$(NC)"
 
-tui-screenshot:
-	@echo -e "$(BLUE)📸 Capturing TUI screenshot (headless)$(NC)"
-	@python3 -c "import asyncio, sys; sys.path.insert(0, '$(TUI_DIR)'); \
-		from app import DeepSearchTUI; \
-		async def m(): \
-			from pathlib import Path; \
-			t = DeepSearchTUI(); \
-			async with t.run_test() as p: await p.pause(); \
-			Path('$(TUI_DIR)/screenshot.svg').write_text(t.export_screenshot(title='DeepSearchStack TUI')); \
-			print('saved $(TUI_DIR)/screenshot.svg'); \
-		asyncio.run(m())"
+# --- CLI (dss) ---------------------------------------------------------
+$(CLI_BIN): $(wildcard $(CLI_GO_DIR)/*.go) $(CLI_GO_DIR)/go.mod
+	@echo -e "$(BLUE)🔨 Building Go CLI (dss)$(NC)"
+	@cd $(CLI_GO_DIR) && go build -o dss ./...
+
+cli: $(CLI_BIN)
+	@echo -e "$(CYAN)dss CLI ready: $(CLI_BIN)$(NC)"
+	@$(CLI_BIN) --base-url http://localhost:$${DSS_PORT:-8083} health
+
+cli-install: $(CLI_BIN)
+	@cd $(CLI_GO_DIR) && $(MAKE) install
+	@echo -e "$(GREEN)✅ installed: ~/.local/bin/dss — try: dss health$(NC)"
+
+cli-rebuild:
+	@cd $(CLI_GO_DIR) && go build -o dss ./...
+	@echo -e "$(GREEN)✅ rebuilt $(CLI_BIN)$(NC)"
 
 sdk-install:
 	@echo -e "$(BLUE)📦 Installing SDK + TUI dependencies$(NC)"
@@ -524,7 +535,7 @@ restart-llm:    service=inference-gateway ; $(MAKE) --no-print-directory restart
 .PHONY: shell-web shell-search shell-agent shell-llm shell-vec shell-wh shell-crawl shell-db shell-redis
 .PHONY: logs-web logs-search logs-agent logs-llm logs-vec logs-wh logs-crawl logs-db
 .PHONY: restart-web restart-search restart-agent restart-llm
-.PHONY: tui tui-local tui-test tui-screenshot sdk-install sdk-test sdk-test-unit sdk-repl
+.PHONY: tui tui-local tui-test tui-rebuild sdk-install sdk-test sdk-test-unit sdk-repl cli cli-install cli-rebuild
 .PHONY: ping audit todo versions env-diff check-deps
 
 # --- Quick API curls (most common debug) -------------------------------
@@ -643,9 +654,8 @@ persistence-test:                               # verify data survives down + up
 	@echo -e "$(BLUE)💾 Running persistence E2E test$(NC)"
 	@bash tests/persistence/test_e2e_persistence.sh
 
-snapshot:                                       # capture TUI screenshot + version info
-	@$(MAKE) --no-print-directory tui-screenshot
-	@$(MAKE) --no-print-directory versions | tee $(TUI_DIR)/snapshot.txt
-	@echo -e "$(GREEN)✅ snapshot saved$(NC)"
+snapshot:                                       # version info for bug reports
+	@$(MAKE) --no-print-directory versions | tee /tmp/dss-snapshot.txt
+	@echo -e "$(GREEN)✅ snapshot saved to /tmp/dss-snapshot.txt$(NC)"
 
 .PHONY: e2e persistence-test snapshot

@@ -1,9 +1,0 @@
-echo -e "\033[0;36m🔖 Versions\033[0m"; \
-echo "  docker:  $(docker --version 2>/dev/null | sed -E 's/^Docker version ([^,]+).*/\1/')"; \
-echo "  compose: $(docker compose version --short 2>/dev/null || docker compose version 2>/dev/null | awk '{print $NF}')"; \
-echo "  python:  $(python3 --version 2>&1 | awk '{print $2}')"; \
-if docker compose -f infra/docker-compose.yml --env-file infra/env/.dev.env -p deepsearch-stack-full ps web-api 2>/dev/null | grep -q web-api; then \
-	docker compose -f infra/docker-compose.yml --env-file infra/env/.dev.env -p deepsearch-stack-full ps --format '  {{.Service}}: {{.Image}}' 2>/dev/null; \
-else \
-	echo "  (stack not running)"; \
-fi

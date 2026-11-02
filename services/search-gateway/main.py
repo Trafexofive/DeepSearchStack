@@ -24,7 +24,7 @@ logger = logging.getLogger("search_gateway")
 # Per-provider timeout (audit N5): if a single provider is slow, the
 # whole gather() waits for it. Wrapping each in asyncio.wait_for cuts
 # off the slow ones so fast providers don't get held up.
-PROVIDER_TIMEOUT_DEFAULT = float(os.environ.get("PROVIDER_TIMEOUT", "4.0"))
+PROVIDER_TIMEOUT_DEFAULT = float(os.environ.get("PROVIDER_TIMEOUT", "7.0"))
 
 
 class SearchGateway:
@@ -59,12 +59,20 @@ class SearchGateway:
             ]
             results = await asyncio.gather(*tasks)
 
-        all_results = [res for pres in results if pres for res in pres]
-        logger.info(f"Got {len(all_results)} total results from {len(request.providers)} providers.")
+        provider_pairs = [
+            (p.value, res)
+            for p, res in zip(request.providers, results)
+            if res
+        ]
+        total_raw = sum(len(res) for _, res in provider_pairs)
+        logger.info(f"Got {total_raw} raw results from {len(provider_pairs)} responsive providers.")
 
-        fused_results = self._fuse_and_deduplicate(all_results)
-        ranked_results = self.ranker.rank_results(request.query, fused_results, request.sort_by)
-        limited_results = ranked_results[:request.max_results]
+        limited_results = self.ranker.fuse_and_rank(
+            query=request.query,
+            provider_results=provider_pairs,
+            sort_method=request.sort_by,
+            max_results=request.max_results
+        )
 
         execution_time = time.time() - start_time
         logger.info(f"Search completed in {execution_time:.2f}s (per-provider timeout: {per_provider_timeout}s).")

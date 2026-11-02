@@ -70,6 +70,28 @@ class CrawlResult:
     error_message: Optional[str] = None
     word_count: int = 0
     extracted_at: Optional[str] = None
+    # Escalation telemetry (set by crawler 2026-06-12+)
+    extraction_method: str = "html"  # html | browser | ocr
+    blocked: bool = False
+    block_reason: Optional[str] = None
+    escalations: List[str] = field(default_factory=list)
+    screenshot_b64: Optional[str] = None
+    screenshot_path: Optional[str] = None
+
+
+@dataclass
+class RenderResult:
+    """Result from a /dss/render/render call (browser-renderer service)."""
+    url: str
+    final_url: str
+    status: Optional[int]
+    html: str
+    html_length: int
+    blocked: bool
+    block_reason: Optional[str] = None
+    screenshot_b64: Optional[str] = None
+    screenshot_path: Optional[str] = None
+    elapsed_ms: int = 0
 
 
 @dataclass
@@ -448,12 +470,21 @@ class AsyncDeepSearchClient:
         extract_metadata: bool = True,
         timeout: int = 30,
         forward_to_warehouse: bool = False,
+        render_mode: str = "auto",
+        enable_ocr_fallback: bool = True,
+        return_screenshot: bool = False,
     ) -> Result:
         """Crawl a single URL via the crawler service.
 
         The route is /dss/crawl/crawl — nginx strips /dss/crawl/ and
         appends the rest, so /dss/crawl/crawl becomes /crawl on the
         crawler service (the actual endpoint name).
+
+        render_mode (added 2026-06-12):
+          - "auto"    fast crawl4ai; auto-escalate to browser/ocr on thin/blocked.
+          - "fast"    crawl4ai only, no escalation.
+          - "browser" force playwright via browser-renderer.
+          - "ocr"     force screenshot+vision LLM (uses inference-gateway).
         """
         payload = {
             "url": url,
@@ -461,12 +492,15 @@ class AsyncDeepSearchClient:
             "extract_metadata": extract_metadata,
             "timeout": timeout,
             "forward_to_warehouse": forward_to_warehouse,
+            "render_mode": render_mode,
+            "enable_ocr_fallback": enable_ocr_fallback,
+            "return_screenshot": return_screenshot,
         }
         try:
             r = await self.client.post(
                 f"{self.base_url}/dss/crawl/crawl",
                 json=payload,
-                timeout=float(timeout) + 5.0,
+                timeout=float(timeout) + 90.0,  # leave room for browser+ocr escalation
             )
             r.raise_for_status()
             data = r.json()
@@ -479,9 +513,60 @@ class AsyncDeepSearchClient:
                 error_message=data.get("error_message"),
                 word_count=data.get("word_count", 0),
                 extracted_at=data.get("extracted_at"),
+                extraction_method=data.get("extraction_method", "html"),
+                blocked=data.get("blocked", False),
+                block_reason=data.get("block_reason"),
+                escalations=data.get("escalations", []) or [],
+                screenshot_b64=data.get("screenshot_b64"),
+                screenshot_path=data.get("screenshot_path"),
             ), None
         except Exception as e:
             return CrawlResult(url=url, content="", success=False, error_message=str(e)), f"{type(e).__name__}: {e}"
+
+    async def render(
+        self,
+        url: str,
+        screenshot: bool = False,
+        full_page_screenshot: bool = True,
+        wait: str = "networkidle",
+        timeout_ms: int = 25000,
+        save_screenshot: bool = False,
+    ) -> Result:
+        """Render a URL via the browser-renderer (Playwright Chromium, realistic UA).
+
+        Use this when you want raw HTML + optional screenshot, without the
+        crawler's markdown/cache/warehouse layer. Route: /dss/render/render.
+        """
+        payload = {
+            "url": url,
+            "screenshot": screenshot,
+            "full_page_screenshot": full_page_screenshot,
+            "wait": wait,
+            "timeout_ms": timeout_ms,
+            "save_screenshot": save_screenshot,
+        }
+        try:
+            r = await self.client.post(
+                f"{self.base_url}/dss/render/render",
+                json=payload,
+                timeout=float(timeout_ms) / 1000.0 + 30.0,
+            )
+            r.raise_for_status()
+            d = r.json()
+            return RenderResult(
+                url=d.get("url", url),
+                final_url=d.get("final_url", url),
+                status=d.get("status"),
+                html=d.get("html", ""),
+                html_length=d.get("html_length", 0),
+                blocked=d.get("blocked", False),
+                block_reason=d.get("block_reason"),
+                screenshot_b64=d.get("screenshot_b64"),
+                screenshot_path=d.get("screenshot_path"),
+                elapsed_ms=d.get("elapsed_ms", 0),
+            ), None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
 
     async def crawl_batch(
         self,
@@ -574,6 +659,53 @@ class AsyncDeepSearchClient:
                 for h in data
             ]
             return hits, None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    async def warehouse_list(
+        self,
+        limit: int = 20,
+        domain: Optional[str] = None,
+    ) -> Result:
+        """List the N most recent warehouse rows.
+
+        Use this to audit what's actually landed (data-quality inspection)
+        rather than only being able to query by keyword.
+        """
+        params: Dict[str, Any] = {"limit": limit}
+        if domain:
+            params["domain"] = domain
+        try:
+            r = await self.client.get(
+                f"{self.base_url}/dss/warehouse/list",
+                params=params,
+            )
+            r.raise_for_status()
+            data = r.json()
+            hits = [
+                WarehouseHit(
+                    id=h["id"],
+                    url=h["url"],
+                    title=h.get("title"),
+                    snippet=h.get("snippet"),
+                    source_domain=h.get("source_domain"),
+                    word_count=h.get("word_count", 0),
+                    ingested_at=h.get("ingested_at", ""),
+                )
+                for h in data
+            ]
+            return hits, None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}"
+
+    async def warehouse_get(self, item_id: int) -> Result:
+        """Get the full content of a single warehouse row by id."""
+        try:
+            r = await self.client.get(
+                f"{self.base_url}/dss/warehouse/content/{item_id}",
+            )
+            r.raise_for_status()
+            return r.json(), None
         except Exception as e:
             return None, f"{type(e).__name__}: {e}"
 

@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Ingest local files or a folder of files into the DSS warehouse.
+
+Usage:
+    dss-ingest path/to/paper.pdf
+    dss-ingest ~/Papers/                       # recurses, all supported types
+    dss-ingest -t '*.pdf' ~/Library/
+
+Recognized: pdf, docx, doc, epub, md, markdown, txt, rtf.
+"""
+import argparse, fnmatch, os, sys, time
+from pathlib import Path
+import httpx
+
+DEFAULT_BASE = os.environ.get("DSS_BASE_URL", "http://localhost:8083")
+SUPPORTED = {".pdf", ".docx", ".doc", ".epub", ".md", ".markdown", ".txt", ".rtf"}
+
+
+def collect(paths, glob):
+    out = []
+    for p in paths:
+        path = Path(p).expanduser()
+        if path.is_file():
+            out.append(path)
+        elif path.is_dir():
+            for f in path.rglob("*"):
+                if not f.is_file():
+                    continue
+                if f.suffix.lower() not in SUPPORTED:
+                    continue
+                if glob and not fnmatch.fnmatch(f.name.lower(), glob.lower()):
+                    continue
+                out.append(f)
+        else:
+            print(f"  skip: {path} (not found)", file=sys.stderr)
+    return out
+
+
+def ingest_one(client, base, path: Path, session_id: str):
+    try:
+        body = path.read_bytes()
+    except Exception as e:
+        return path, None, str(e)
+    headers = {
+        "Content-Type": "application/octet-stream",
+        "X-Filename": path.name,
+        "X-Source-Url": f"local://{path.absolute()}",
+        "X-Session-Id": session_id,
+        "X-Title": path.stem,
+    }
+    try:
+        t0 = time.time()
+        r = client.post(f"{base}/dss/crawl/ingest-file", content=body, headers=headers, timeout=300)
+        elapsed = int((time.time() - t0) * 1000)
+        if r.status_code != 200:
+            return path, None, f"HTTP {r.status_code}: {r.text[:200]}"
+        d = r.json()
+        d["_elapsed_ms"] = elapsed
+        return path, d, None
+    except Exception as e:
+        return path, None, str(e)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("paths", nargs="+", help="Files or directories")
+    ap.add_argument("-t", "--glob", help="Glob filter applied to filenames (e.g. '*.pdf')")
+    ap.add_argument("--base", default=DEFAULT_BASE)
+    args = ap.parse_args()
+
+    files = collect(args.paths, args.glob)
+    if not files:
+        print("no files matched", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"ingesting {len(files)} files into {args.base}")
+    session_id = f"local-{int(time.time())}"
+    ok = err = 0
+    total_words = 0
+    with httpx.Client() as client:
+        for i, f in enumerate(files, 1):
+            path, d, e = ingest_one(client, args.base, f, session_id)
+            if e:
+                err += 1
+                print(f"  [{i:3d}/{len(files)}] ✗ {path.name}: {e}")
+                continue
+            ok += 1
+            total_words += d.get("word_count", 0)
+            ocr = "  [OCR]" if d.get("extraction_method") == "pdf-ocr" else ""
+            print(f"  [{i:3d}/{len(files)}] ✓ {path.name} "
+                  f"→ id={d.get('warehouse_id')} {d.get('extraction_method')}{ocr} "
+                  f"wc={d.get('word_count')} ({d.get('_elapsed_ms')}ms)")
+    print(f"\nsession={session_id}  ok={ok}  err={err}  total_words={total_words:,}")
+
+
+if __name__ == "__main__":
+    main()

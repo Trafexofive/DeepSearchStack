@@ -1,90 +1,245 @@
-
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from typing import List
-from urllib.parse import urlparse
+import re
+import math
 import logging
+from typing import List, Dict, Tuple, Optional, Set
+from urllib.parse import urlparse
+from datetime import datetime
 
-from search_gateway.common.models import SearchResult, SortMethod
+from libs.common.models import SearchResult, SortMethod
+from libs.common.text import normalize_url
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("result_ranker")
+
+# Epistemic domain classification patterns
+ARTIFACT_PATTERNS = {
+    "paper": [
+        "arxiv.org", "doi.org", "ncbi.nlm.nih.gov", "semanticscholar.org",
+        "biorxiv.org", "medrxiv.org", "nature.com", "sciencedirect.com",
+        "ieee.org", "acm.org", "springer.com", "usenix.org"
+    ],
+    "code": [
+        "github.com", "gitlab.com", "bitbucket.org", "crates.io",
+        "pypi.org", "pkg.go.dev", "npmjs.com", "sourceforge.net"
+    ],
+    "spec": [
+        "ietf.org", "w3.org", "rfc-editor.org", "iso.org",
+        "tc39.es", "ecma-international.org", "man7.org"
+    ],
+    "qna": [
+        "stackoverflow.com", "stackexchange.com", "serverfault.com",
+        "askubuntu.com", "quora.com"
+    ],
+    "discussion": [
+        "news.ycombinator.com", "reddit.com", "lobste.rs"
+    ],
+    "reference": [
+        "wikipedia.org", "wikibooks.org", "wiktionary.org",
+        "plato.stanford.edu", "britannica.com", "developer.mozilla.org"
+    ]
+}
+
+# Domain baseline authority weights (0.0 to 1.0)
+HIGH_AUTHORITY_DOMAINS = {
+    "wikipedia.org": 0.95,
+    "github.com": 0.92,
+    "arxiv.org": 0.92,
+    "usenix.org": 0.95,
+    "rfc-editor.org": 0.98,
+    "ietf.org": 0.95,
+    "w3.org": 0.92,
+    "stackoverflow.com": 0.88,
+    "stackexchange.com": 0.85,
+    "news.ycombinator.com": 0.85,
+    "developer.mozilla.org": 0.92,
+}
+
+# Default provider weights for RRF
+PROVIDER_WEIGHTS = {
+    "pubmed": 1.3,
+    "arxiv": 1.25,
+    "wikipedia": 1.2,
+    "crossref": 1.2,
+    "stackexchange": 1.2,
+    "github": 1.15,
+    "hackernews": 1.1,
+    "duckduckgo": 1.1,
+    "searxng": 1.0,
+    "reddit": 0.9,
+    "archive": 0.9,
+    "yacy": 0.8,
+}
+
+RRF_K = 60  # Industry standard smoothing constant
+
 
 class ResultRanker:
-    """Advanced ranking system for search results"""
-    
-    def __init__(self):
-        self.vectorizer = TfidfVectorizer(stop_words='english')
-        self.domain_authority = {
-            "wikipedia.org": 0.95,
-            "github.com": 0.9,
-            "arxiv.org": 0.85,
-            "scholar.google.com": 0.9,
-            "medium.com": 0.7,
-            "stackexchange.com": 0.85,
-            "stackoverflow.com": 0.88,
-        }
-        
-    def _extract_domain(self, url):
+    """Production-grade Reciprocal Rank Fusion (RRF) & Consensus ranker.
+
+    Fuses multiple independent search provider outputs by:
+    1. Canonical URL normalization and deduplication
+    2. Multi-engine positional Reciprocal Rank Fusion
+    3. Cross-provider consensus boosting (agreement multiplier)
+    4. Epistemic artifact classification (paper, code, spec, qna, discussion)
+    5. Term coverage scoring against query
+    """
+
+    def _extract_domain(self, url: str) -> str:
         try:
-            return urlparse(url).netloc.lower()
-        except: return ""
-            
-    def _calculate_relevance_score(self, query, results):
-        if not results: return []
-        corpus = [f"{r.title} {r.description}" for r in results]
-        corpus.insert(0, query)
-        try:
-            tfidf_matrix = self.vectorizer.fit_transform(corpus)
-            cosine_similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
-            for idx, score in enumerate(cosine_similarities):
-                results[idx].confidence = float(score)
-        except Exception as e:
-            logger.warning(f"Error calculating relevance scores: {e}")
-        return results
-        
-    def _apply_domain_authority(self, results):
-        for result in results:
-            domain = self._extract_domain(result.url)
-            base_domain = '.'.join(domain.split('.')[-2:]) if domain.count('.') > 1 else domain
-            authority = self.domain_authority.get(domain) or self.domain_authority.get(base_domain, 0.5)
-            result.domain_authority = authority
-            result.confidence = 0.7 * result.confidence + 0.3 * authority
-        return results
-        
+            netloc = urlparse(url).netloc.lower()
+            if netloc.startswith("www."):
+                netloc = netloc[4:]
+            return netloc
+        except Exception:
+            return ""
+
+    def classify_artifact(self, url: str) -> str:
+        domain = self._extract_domain(url)
+        for artifact_type, patterns in ARTIFACT_PATTERNS.items():
+            for pat in patterns:
+                if pat in domain:
+                    return artifact_type
+        if domain.endswith(".edu") or domain.endswith(".gov"):
+            return "academic_or_gov"
+        return "web"
+
+    def get_domain_authority(self, url: str) -> float:
+        domain = self._extract_domain(url)
+        if not domain:
+            return 0.5
+        for auth_domain, score in HIGH_AUTHORITY_DOMAINS.items():
+            if domain == auth_domain or domain.endswith("." + auth_domain):
+                return score
+        if domain.endswith(".gov") or domain.endswith(".edu"):
+            return 0.88
+        if domain.endswith(".org"):
+            return 0.75
+        return 0.55
+
+    def _term_coverage(self, query: str, title: str, description: str) -> float:
+        """Calculate lexical term coverage of query in title/description."""
+        q_tokens = set(re.findall(r"\w+", query.lower()))
+        if not q_tokens:
+            return 0.5
+        doc_tokens = set(re.findall(r"\w+", f"{title} {description}".lower()))
+        matched = q_tokens.intersection(doc_tokens)
+        return len(matched) / len(q_tokens)
+
+    def fuse_and_rank(
+        self,
+        query: str,
+        provider_results: List[Tuple[str, List[SearchResult]]],
+        sort_method: SortMethod = SortMethod.RELEVANCE,
+        max_results: int = 15,
+    ) -> List[SearchResult]:
+        """Fuse and rank results from multiple search providers using RRF and Consensus."""
+        if not provider_results:
+            return []
+
+        # Step 1: Group and deduplicate by canonical URL
+        # canonical_url -> {
+        #   "item": SearchResult,
+        #   "sources": set,
+        #   "ranks": {provider: rank_idx},
+        #   "best_title": str,
+        #   "best_desc": str
+        # }
+        fused: Dict[str, dict] = {}
+
+        for provider, results in provider_results:
+            p_weight = PROVIDER_WEIGHTS.get(provider.lower(), 1.0)
+            for rank_idx, res in enumerate(results):
+                if not res.url:
+                    continue
+                can_url = normalize_url(res.url)
+                if can_url not in fused:
+                    fused[can_url] = {
+                        "item": res,
+                        "sources": set(),
+                        "ranks": {},
+                        "best_title": res.title or "",
+                        "best_desc": res.description or "",
+                    }
+                entry = fused[can_url]
+                entry["sources"].add(provider)
+                if provider not in entry["ranks"]:
+                    entry["ranks"][provider] = rank_idx
+                # Keep the more informative title and snippet
+                if len(res.title or "") > len(entry["best_title"]):
+                    entry["best_title"] = res.title
+                if len(res.description or "") > len(entry["best_desc"]):
+                    entry["best_desc"] = res.description
+
+        if not fused:
+            return []
+
+        # Step 2: Compute RRF, Consensus, Domain Authority, and Term Overlap
+        scored_items: List[SearchResult] = []
+        raw_scores: List[float] = []
+
+        for can_url, data in fused.items():
+            base_item: SearchResult = data["item"]
+            sources = data["sources"]
+            ranks = data["ranks"]
+
+            # 2a. Reciprocal Rank Fusion
+            rrf_score = 0.0
+            for prov, r_idx in ranks.items():
+                w = PROVIDER_WEIGHTS.get(prov.lower(), 1.0)
+                rrf_score += w * (1.0 / (RRF_K + r_idx + 1))
+
+            # 2b. Consensus Multiplier (Agreement across independent engines)
+            num_sources = len(sources)
+            consensus_mult = 1.0 + 0.35 * (num_sources - 1)
+
+            # 2c. Domain Authority
+            domain_auth = self.get_domain_authority(base_item.url)
+
+            # 2d. Term Coverage
+            term_cov = self._term_coverage(query, data["best_title"], data["best_desc"])
+
+            # 2e. Composite Score
+            # RRF is the backbone; consensus boosts agreed hits; authority and coverage calibrate.
+            composite = rrf_score * consensus_mult * (0.6 + 0.4 * domain_auth) * (0.7 + 0.3 * term_cov)
+            raw_scores.append(composite)
+
+            # Hydrate clean fields
+            base_item.title = data["best_title"]
+            base_item.description = data["best_desc"]
+            base_item.domain_authority = round(domain_auth, 3)
+            # Store primary source provider or joined sources
+            base_item.source = "+".join(sorted(sources))
+            base_item.confidence = composite  # will normalize below
+            scored_items.append(base_item)
+
+        # Step 3: Score Normalization into [0.05, 0.99]
+        if raw_scores:
+            max_s = max(raw_scores)
+            min_s = min(raw_scores)
+            span = max_s - min_s if max_s > min_s else 1.0
+            for item in scored_items:
+                norm = 0.35 + 0.60 * ((item.confidence - min_s) / span)
+                item.confidence = round(norm, 3)
+
+        # Step 4: Sorting
+        if sort_method == SortMethod.DATE:
+            scored_items.sort(key=lambda x: (x.published_date or datetime.min, x.confidence), reverse=True)
+        elif str(sort_method.value if hasattr(sort_method, "value") else sort_method) == "source_quality":
+            scored_items.sort(key=lambda x: (x.domain_authority or 0.0, x.confidence), reverse=True)
+        else:  # RELEVANCE
+            scored_items.sort(key=lambda x: x.confidence, reverse=True)
+
+        # Step 5: Assign rank numbers
+        final_list = scored_items[:max_results]
+        for idx, item in enumerate(final_list):
+            item.rank = idx + 1
+
+        return final_list
+
+    # Backwards compatibility alias
     def rank_results(self, query: str, results: List[SearchResult], sort_method: SortMethod = SortMethod.RELEVANCE) -> List[SearchResult]:
-        """Rank search results with provider diversity — ensures representation from each source."""
-        if not results: return []
-        results = self._calculate_relevance_score(query, results)
-        results = self._apply_domain_authority(results)
-
-        if sort_method == SortMethod.RELEVANCE:
-            results.sort(key=lambda x: x.confidence, reverse=True)
-        elif sort_method == SortMethod.DATE:
-            results.sort(key=lambda x: (x.published_date or "", x.confidence), reverse=True)
-        elif sort_method == SortMethod.SOURCE_QUALITY:
-            results.sort(key=lambda x: (x.domain_authority or 0, x.confidence), reverse=True)
-
-        # Provider-aware diversification: interleave top results from each source
-        from collections import defaultdict
-        by_source = defaultdict(list)
+        if not results:
+            return []
+        grouped = {}
         for r in results:
-            by_source[r.source].append(r)
-
-        # Sort each source's results internally by confidence
-        for src in by_source:
-            by_source[src].sort(key=lambda x: x.confidence, reverse=True)
-
-        # Round-robin interleave from all sources
-        sources = sorted(by_source.keys())
-        diversified = []
-        idx = 0
-        while any(idx < len(by_source[s]) for s in sources):
-            for s in sources:
-                if idx < len(by_source[s]):
-                    diversified.append(by_source[s][idx])
-            idx += 1
-
-        for i, result in enumerate(diversified):
-            result.rank = i + 1
-        return diversified
+            grouped.setdefault(r.source, []).append(r)
+        return self.fuse_and_rank(query, list(grouped.items()), sort_method=sort_method, max_results=len(results))

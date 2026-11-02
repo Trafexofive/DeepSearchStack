@@ -28,6 +28,7 @@ class SearchProvider(str, Enum):
 class SortMethod(str, Enum):
     RELEVANCE = "relevance"
     DATE = "date"
+    SOURCE_QUALITY = "source_quality"
 
 
 # ==================== SEARCH MODELS ====================

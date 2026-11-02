@@ -9,9 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chown nobody:nogroup /var/run/tinyproxy /var/log/tinyproxy
 
 WORKDIR /app
-COPY requirements.txt .
+# Build context is the repo root (set in docker-compose.yml: context: ..)
+COPY services/proxy-rotator/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY main.py .
+COPY services/proxy-rotator/main.py .
 
 # Tor data dir for persistence across restarts
 VOLUME ["/tmp/tor"]

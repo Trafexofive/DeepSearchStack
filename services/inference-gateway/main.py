@@ -90,9 +90,42 @@ async def health():
 model_catalog: dict[str, ModelInfo] = {}
 
 
+async def _discover_nvidia_nim_models(api_key: str) -> list[ModelInfo]:
+    """Probe NVIDIA NIM /v1/models and return live entries only.
+
+    The hardcoded catalog had stale model IDs (meta/llama-4-scout-17b,
+    google/gemma-3-27b-it, microsoft/phi-4-mini) that returned 404/410
+    when the user actually called them. Dynamic discovery removes the
+    stale entries and adds whatever NIM is serving today.
+    """
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=10.0) as c:
+            r = await c.get(
+                "https://integrate.api.nvidia.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        logger.warning(f"nvidia_nim discovery failed, falling back to static list: {e}")
+        return []
+
+    out: list[ModelInfo] = []
+    for m in data.get("data", []) or data.get("models", []):
+        mid = m.get("id") or m.get("name")
+        if not mid:
+            continue
+        owned_by = m.get("owned_by") or mid.split("/")[0] if "/" in mid else ""
+        ctx = m.get("context_length") or m.get("max_input_tokens") or 0
+        out.append(ModelInfo(id=mid, provider="nvidia_nim", owned_by=owned_by, context_length=int(ctx)))
+    return out
+
+
 @app.on_event("startup")
 async def discover_models():
-    """Build the model catalog from static entries + live discovery."""
+    """Build the model catalog: small static entries for fixed providers,
+    live discovery for NVIDIA NIM where the catalog drifts frequently."""
     static_models = {
         "deepseek": [
             ModelInfo(id="deepseek-chat", provider="deepseek", owned_by="deepseek-ai", context_length=65536),
@@ -109,23 +142,30 @@ async def discover_models():
             ModelInfo(id="mixtral-8x7b-32768", provider="groq", owned_by="mistral-ai", context_length=32768),
             ModelInfo(id="gemma2-9b-it", provider="groq", owned_by="google", context_length=8192),
         ],
-        "nvidia_nim": [
-            ModelInfo(id="zhipuai/glm-4-9b-chat", provider="nvidia_nim", owned_by="zhipu-ai", context_length=131072),
-            ModelInfo(id="minimax/minimax-m1", provider="nvidia_nim", owned_by="minimax", context_length=4194304),
-            ModelInfo(id="deepseek-ai/deepseek-r1", provider="nvidia_nim", owned_by="deepseek-ai", context_length=131072),
-            ModelInfo(id="meta/llama-4-maverick-17b", provider="nvidia_nim", owned_by="meta", context_length=131072),
-            ModelInfo(id="meta/llama-4-scout-17b", provider="nvidia_nim", owned_by="meta", context_length=10485760),
-            ModelInfo(id="qwen/qwen3-235b-a22b", provider="nvidia_nim", owned_by="alibaba", context_length=131072),
-            ModelInfo(id="mistralai/mistral-large-2", provider="nvidia_nim", owned_by="mistral-ai", context_length=131072),
-            ModelInfo(id="google/gemma-3-27b-it", provider="nvidia_nim", owned_by="google", context_length=131072),
-            ModelInfo(id="microsoft/phi-4-mini", provider="nvidia_nim", owned_by="microsoft", context_length=131072),
-        ],
     }
 
     for provider_name, models in static_models.items():
         if provider_name in providers:
             for m in models:
                 model_catalog[f"{provider_name}:{m.id}"] = m
+
+    # NVIDIA NIM — dynamic discovery so we don't serve 404-bound model IDs.
+    if "nvidia_nim" in providers:
+        api_key = os.environ.get("NVIDIA_API_KEY", "")
+        live = await _discover_nvidia_nim_models(api_key) if api_key else []
+        if live:
+            for m in live:
+                model_catalog[f"nvidia_nim:{m.id}"] = m
+            logger.info(f"nvidia_nim: discovered {len(live)} live models")
+        else:
+            # Conservative static fallback — only models known to work right now.
+            for m in [
+                ModelInfo(id="meta/llama-3.2-11b-vision-instruct", provider="nvidia_nim", owned_by="meta", context_length=131072),
+                ModelInfo(id="meta/llama-3.2-90b-vision-instruct", provider="nvidia_nim", owned_by="meta", context_length=131072),
+                ModelInfo(id="deepseek-ai/deepseek-r1", provider="nvidia_nim", owned_by="deepseek-ai", context_length=131072),
+            ]:
+                model_catalog[f"nvidia_nim:{m.id}"] = m
+            logger.warning("nvidia_nim: using static fallback catalog (no API key or discovery failed)")
 
     logger.info(f"Model catalog: {len(model_catalog)} models across {len(providers)} providers")
 
