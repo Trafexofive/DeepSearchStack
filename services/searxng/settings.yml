@@ -48,7 +48,7 @@ engines:
   - name: bing
     engine: bing
     shortcut: bi
-    disabled: false
+    disabled: true
   - name: mojeek
     engine: mojeek
     shortcut: mj
@@ -68,11 +68,11 @@ engines:
   - name: yep
     engine: yep
     shortcut: yep
-    disabled: false
+    disabled: true
   - name: presearch
     engine: presearch
     shortcut: pre
-    disabled: false
+    disabled: true
   - name: ecosia
     engine: ecosia
     shortcut: eco

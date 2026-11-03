@@ -1,31 +1,70 @@
-
-#
-# services/search-gateway/main.py
-#
 import os
+import re
 import time
 import httpx
 import asyncio
 import logging
+from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, Depends
 from contextlib import asynccontextmanager
 import redis.asyncio as redis
-from typing import List
 
-# Corrected relative imports for the new service structure
-from .common.models import SearchGatewayRequest, SearchResult
+from .common.models import SearchGatewayRequest, SearchResult, SearchProvider, SortMethod
 from .providers.provider_manager import SearchProviderManager
 from .ranking.result_ranker import ResultRanker
 from .utils.system_components import MetricsCollector, CircuitBreaker
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("search_gateway")
-
-# Per-provider timeout (audit N5): if a single provider is slow, the
-# whole gather() waits for it. Wrapping each in asyncio.wait_for cuts
-# off the slow ones so fast providers don't get held up.
 PROVIDER_TIMEOUT_DEFAULT = float(os.environ.get("PROVIDER_TIMEOUT", "7.0"))
 
+DOMAIN_PRESETS = {
+    "tech": [
+        SearchProvider.GITHUB,
+        SearchProvider.STACKEXCHANGE,
+        SearchProvider.HACKERNEWS,
+        SearchProvider.DUCKDUCKGO,
+        SearchProvider.WIKIPEDIA,
+    ],
+    "code": [
+        SearchProvider.GITHUB,
+        SearchProvider.STACKEXCHANGE,
+        SearchProvider.HACKERNEWS,
+    ],
+    "academic": [
+        SearchProvider.ARXIV,
+        SearchProvider.PUBMED,
+        SearchProvider.CROSSREF,
+        SearchProvider.WIKIPEDIA,
+    ],
+    "science": [
+        SearchProvider.ARXIV,
+        SearchProvider.PUBMED,
+        SearchProvider.CROSSREF,
+    ],
+    "biomedical": [
+        SearchProvider.PUBMED,
+        SearchProvider.CROSSREF,
+        SearchProvider.ARXIV,
+        SearchProvider.WIKIPEDIA,
+    ],
+    "discussions": [
+        SearchProvider.HACKERNEWS,
+        SearchProvider.REDDIT,
+        SearchProvider.STACKEXCHANGE,
+    ],
+    "all": [
+        SearchProvider.ARXIV,
+        SearchProvider.PUBMED,
+        SearchProvider.CROSSREF,
+        SearchProvider.GITHUB,
+        SearchProvider.STACKEXCHANGE,
+        SearchProvider.HACKERNEWS,
+        SearchProvider.DUCKDUCKGO,
+        SearchProvider.WIKIPEDIA,
+        SearchProvider.REDDIT,
+        SearchProvider.INTERNET_ARCHIVE,
+    ],
+}
 
 class SearchGateway:
     def __init__(self, redis_client: redis.Redis):
@@ -47,21 +86,77 @@ class SearchGateway:
             logger.warning(f"Provider {provider.value} error: {type(e).__name__}: {e}")
             return None
 
+    def resolve_providers(self, request: SearchGatewayRequest) -> List[SearchProvider]:
+        """Strict precedence provider resolution:
+        1. Explicit caller override (request.providers)
+        2. Configurable domain preset (request.domain)
+        3. Automatic heuristic intent classification
+        """
+        if request.providers is not None and len(request.providers) > 0:
+            return request.providers
+
+        if request.domain:
+            domain_key = request.domain.lower().strip()
+            if domain_key in DOMAIN_PRESETS:
+                return DOMAIN_PRESETS[domain_key]
+
+        return self._classify_intent(request.query)
+
+    def _classify_intent(self, query: str) -> List[SearchProvider]:
+        q = query.lower()
+        tokens = set(re.findall(r"\w+", q))
+
+        bio_terms = {
+            "crispr", "gene", "dna", "rna", "protein", "disease", "clinical", "cell",
+            "therapy", "drug", "trial", "patient", "syndrome", "virus", "cancer", "antibody"
+        }
+        if tokens.intersection(bio_terms):
+            return DOMAIN_PRESETS["biomedical"]
+
+        tech_terms = {
+            "algorithm", "consensus", "rust", "python", "golang", "cpp", "c", "linux",
+            "kernel", "docker", "kubernetes", "database", "sql", "postgres", "redis",
+            "async", "thread", "mutex", "segv", "sigsegv", "api", "bug", "error",
+            "raft", "paxos", "vector", "llm", "git", "github", "compile", "heap", "stack"
+        }
+        if tokens.intersection(tech_terms) or "_" in q:
+            return DOMAIN_PRESETS["tech"]
+
+        academic_terms = {
+            "paper", "arxiv", "theorem", "proof", "model", "benchmark", "quantum",
+            "evaluation", "survey", "formal", "verification", "complexity", "hypothesis"
+        }
+        if tokens.intersection(academic_terms):
+            return DOMAIN_PRESETS["academic"]
+
+        # Default balanced fallback across core ground-truth providers
+        return [
+            SearchProvider.DUCKDUCKGO,
+            SearchProvider.WIKIPEDIA,
+            SearchProvider.GITHUB,
+            SearchProvider.ARXIV,
+            SearchProvider.STACKEXCHANGE,
+            SearchProvider.HACKERNEWS,
+        ]
+
     async def search(self, request: SearchGatewayRequest) -> List[SearchResult]:
         start_time = time.time()
         # Per-provider timeout capped at the request-level timeout.
         per_provider_timeout = min(PROVIDER_TIMEOUT_DEFAULT, request.timeout)
 
+        active_providers = self.resolve_providers(request)
+        logger.info(f"Query '{request.query}' resolved to {len(active_providers)} providers: {[p.value for p in active_providers]}")
+
         async with httpx.AsyncClient(timeout=request.timeout) as client:
             tasks = [
                 self._query_with_timeout(client, p, request.query, request, per_provider_timeout)
-                for p in request.providers
+                for p in active_providers
             ]
             results = await asyncio.gather(*tasks)
 
         provider_pairs = [
             (p.value, res)
-            for p, res in zip(request.providers, results)
+            for p, res in zip(active_providers, results)
             if res
         ]
         total_raw = sum(len(res) for _, res in provider_pairs)

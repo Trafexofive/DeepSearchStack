@@ -46,11 +46,8 @@ class SearchResult(BaseModel):
 
 class SearchGatewayRequest(BaseModel):
     query: str
-    providers: List[SearchProvider] = [
-        SearchProvider.SEARXNG,
-        SearchProvider.DUCKDUCKGO,
-        SearchProvider.WIKIPEDIA
-    ]
+    providers: Optional[List[SearchProvider]] = None
+    domain: Optional[str] = None
     max_results: int = 10
     sort_by: SortMethod = SortMethod.RELEVANCE
     timeout: float = 15.0
