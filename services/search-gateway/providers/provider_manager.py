@@ -99,6 +99,69 @@ class SearchProviderManager:
                 "url": "https://archive.org/advancedsearch.php",
                 "weight": 0.9, "parser": self._parse_internetarchive,
             },
+            # ── Additional Primary Sources ──────────────────────────────
+            SearchProvider.OPENALEX: {
+                "url": "https://api.openalex.org/works",
+                "weight": 1.25, "parser": self._parse_openalex,
+            },
+            SearchProvider.MDN: {
+                "url": "https://developer.mozilla.org/api/v1/search",
+                "weight": 1.2, "parser": self._parse_mdn,
+            },
+            SearchProvider.ARCHWIKI: {
+                "url": "https://wiki.archlinux.org/api.php",
+                "weight": 1.15, "parser": self._parse_archwiki,
+            },
+            SearchProvider.CRATES_IO: {
+                "url": "https://crates.io/api/v1/crates",
+                "weight": 1.2, "parser": self._parse_crates,
+            },
+            SearchProvider.NPM: {
+                "url": "https://registry.npmjs.org/-/v1/search",
+                "weight": 1.15, "parser": self._parse_npm,
+            },
+            SearchProvider.IETF: {
+                "url": "https://datatracker.ietf.org/api/v1/doc/document/",
+                "weight": 1.25, "parser": self._parse_ietf,
+            },
+            SearchProvider.NVD: {
+                "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+                "weight": 1.3, "parser": self._parse_nvd,
+            },
+            SearchProvider.GITHUB_ISSUES: {
+                "url": "https://api.github.com/search/issues",
+                "weight": 1.15, "parser": self._parse_github_issues,
+            },
+            # ── Wikimedia Sister Projects ──────────────────────────────
+            SearchProvider.WIKIBOOKS: {
+                "url": "https://en.wikibooks.org/w/api.php",
+                "weight": 1.2, "parser": self._parse_wikibooks,
+            },
+            SearchProvider.WIKIVERSITY: {
+                "url": "https://en.wikiversity.org/w/api.php",
+                "weight": 1.15, "parser": self._parse_wikiversity,
+            },
+            SearchProvider.WIKISOURCE: {
+                "url": "https://en.wikisource.org/w/api.php",
+                "weight": 1.15, "parser": self._parse_wikisource,
+            },
+            SearchProvider.WIKIDATA: {
+                "url": "https://www.wikidata.org/w/api.php",
+                "weight": 1.1, "parser": self._parse_wikidata,
+            },
+            # ── Additional Primary Repositories & Open Access ───────────
+            SearchProvider.GITLAB: {
+                "url": "https://gitlab.com/api/v4/projects",
+                "weight": 1.15, "parser": self._parse_gitlab,
+            },
+            SearchProvider.DOAJ: {
+                "url": "https://doaj.org/api/v2/search/articles",
+                "weight": 1.25, "parser": self._parse_doaj,
+            },
+            SearchProvider.PYPI: {
+                "url": "https://pypi.org/pypi",
+                "weight": 1.2, "parser": self._parse_pypi,
+            },
         }
 
     def get_provider_status(self) -> Dict[str, str]:
@@ -125,7 +188,7 @@ class SearchProviderManager:
             elif provider == SearchProvider.YACY:
                 url = f"{url}/yacysearch.json"
                 params = {"query": query, "maximumRecords": 20}
-            elif provider == SearchProvider.WIKIPEDIA:
+            elif provider in (SearchProvider.WIKIPEDIA, SearchProvider.WIKIBOOKS, SearchProvider.WIKIVERSITY, SearchProvider.WIKISOURCE, SearchProvider.WIKIDATA):
                 params = {"action": "query", "list": "search", "srsearch": query,
                           "format": "json", "srlimit": 10}
             elif provider == SearchProvider.DUCKDUCKGO:
@@ -162,6 +225,42 @@ class SearchProviderManager:
             elif provider == SearchProvider.REDDIT:
                 params = {"q": query, "limit": 10, "sort": "relevance", "type": "link"}
                 headers.update(REDDIT_HEADERS)
+            elif provider == SearchProvider.OPENALEX:
+                params = {"search": query, "per-page": 10}
+            elif provider == SearchProvider.MDN:
+                params = {"q": query, "size": 10}
+            elif provider == SearchProvider.ARCHWIKI:
+                params = {"action": "query", "list": "search", "srsearch": query, "format": "json", "srlimit": 10}
+                headers["User-Agent"] = "DeepSearchStack/1.0 (https://github.com/Trafexofive/DeepSearchStack; contact@deepsearch.local)" 
+            elif provider == SearchProvider.CRATES_IO:
+                # Use primary identifier or unquoted terms for Crates.io
+                crates_q = query.split()[0] if len(query.split()) > 1 and not any(ch in query for ch in ":/") else query
+                params = {"q": crates_q, "per_page": 10}
+                headers["User-Agent"] = "DeepSearchStack/1.0 (https://github.com/Trafexofive/DeepSearchStack)"
+            elif provider == SearchProvider.NPM:
+                params = {"text": query, "size": 10}
+            elif provider == SearchProvider.IETF:
+                # IETF matches exact substring; extract primary token (e.g. HTTP/3, QUIC, BGP, TLS)
+                primary_token = query.split()[0]
+                params = {"title__icontains": primary_token, "format": "json", "limit": 10}
+            elif provider == SearchProvider.NVD:
+                params = {"keywordSearch": query, "resultsPerPage": 5}
+            elif provider == SearchProvider.GITHUB_ISSUES:
+                params = {"q": query, "sort": "updated", "per_page": 10, "order": "desc"}
+                headers["Accept"] = "application/vnd.github.v3+json"
+            elif provider == SearchProvider.GITLAB:
+                params = {"search": query, "per_page": 10}
+            elif provider == SearchProvider.DOAJ:
+                import urllib.parse
+                safe_q = urllib.parse.quote(query)
+                url = f"{url}/{safe_q}"
+                params = {"pageSize": 10}
+                headers["User-Agent"] = "DeepSearchStack/1.0 (https://github.com/Trafexofive/DeepSearchStack; contact@deepsearch.local)" 
+            elif provider == SearchProvider.PYPI:
+                tokens = [t for t in query.lower().split() if len(t) > 1 and not t.startswith("-")]
+                pkg_token = tokens[0] if tokens else query.strip().lower()
+                url = f"{url}/{pkg_token}/json"
+                params = {}
             elif provider == SearchProvider.INTERNET_ARCHIVE:
                 params = {"q": f"title:({query}) OR description:({query})",
                           "output": "json", "rows": 10,
@@ -205,8 +304,6 @@ class SearchProviderManager:
                 results = cfg["parser"](response.text, cfg["weight"])
             elif provider == SearchProvider.PUBMED:
                 results = await self._parse_pubmed(client, response.json(), cfg["weight"])
-            elif provider == SearchProvider.INTERNET_ARCHIVE:
-                results = cfg["parser"](response.json(), cfg["weight"])
             else:
                 raw = response.json()
                 results = cfg["parser"](raw, cfg["weight"])
@@ -385,4 +482,185 @@ class SearchProviderManager:
             desc = f"Published by {pub}" + (f" ({year})" if year else "")
             results.append(SearchResult(title=title, url=url, description=desc,
                                         source="crossref", confidence=w * 1.2))
+        return results
+
+    # ── Additional Primary Source Parsers ─────────────────────────────
+
+    def _parse_openalex(self, data, w):
+        results = []
+        for r in data.get("results", []):
+            title = r.get("display_name", "")
+            if not title:
+                continue
+            url = r.get("doi") or (r.get("primary_location") or {}).get("landing_page_url")
+            if not url:
+                url = f"https://openalex.org/{r.get('id', '').split('/')[-1]}"
+            desc = f"Year: {r.get('publication_year', 'N/A')} · Citations: {r.get('cited_by_count', 0)}"
+            results.append(SearchResult(title=title, url=url, description=desc,
+                                        source="openalex", confidence=w * 1.25))
+        return results
+
+    def _parse_mdn(self, data, w):
+        results = []
+        for doc in data.get("documents", []):
+            title = doc.get("title", "")
+            mdn_url = doc.get("mdn_url", "")
+            if not mdn_url:
+                continue
+            url = f"https://developer.mozilla.org{mdn_url}"
+            desc = doc.get("summary", "")
+            results.append(SearchResult(title=title, url=url, description=desc,
+                                        source="mdn", confidence=w * 1.2))
+        return results
+
+    def _parse_archwiki(self, data, w):
+        results = []
+        for r in data.get("query", {}).get("search", []):
+            title = r.get("title", "")
+            if not title:
+                continue
+            url = f"https://wiki.archlinux.org/title/{title.replace(' ', '_')}"
+            snippet = r.get("snippet", "").replace("<span class=\"searchmatch\">", "").replace("</span>", "")
+            results.append(SearchResult(
+                title=f"{title} - ArchWiki", url=url, description=snippet,
+                source="archwiki", confidence=w * 1.15
+            ))
+        return results
+
+    def _parse_crates(self, data, w):
+        results = []
+        for c in data.get("crates", []):
+            name = c.get("name", "")
+            if not name:
+                continue
+            ver = c.get("max_version", "")
+            title = f"{name} (v{ver})" if ver else name
+            url = f"https://crates.io/crates/{name}"
+            desc = c.get("description", "") or f"Rust crate {name}"
+            results.append(SearchResult(title=title, url=url, description=desc[:250],
+                                        source="crates", confidence=w * 1.2))
+        return results
+
+    def _parse_npm(self, data, w):
+        results = []
+        for obj in data.get("objects", []):
+            pkg = obj.get("package", {})
+            name = pkg.get("name", "")
+            if not name:
+                continue
+            ver = pkg.get("version", "")
+            title = f"{name} (v{ver})" if ver else name
+            links = pkg.get("links", {}) or {}
+            url = links.get("npm", f"https://www.npmjs.com/package/{name}")
+            desc = pkg.get("description", "") or f"NPM package {name}"
+            results.append(SearchResult(title=title, url=url, description=desc[:250],
+                                        source="npm", confidence=w * 1.15))
+        return results
+
+    def _parse_ietf(self, data, w):
+        results = []
+        for obj in data.get("objects", []):
+            title = obj.get("title", "")
+            name = obj.get("name", "")
+            if not name:
+                continue
+            url = f"https://datatracker.ietf.org/doc/{name}/"
+            desc = obj.get("abstract", "") or f"IETF Internet standard / RFC document {name}"
+            results.append(SearchResult(title=title or name, url=url, description=desc[:300],
+                                        source="ietf", confidence=w * 1.25))
+        return results
+
+    def _parse_nvd(self, data, w):
+        results = []
+        for v in data.get("vulnerabilities", []):
+            cve = v.get("cve", {})
+            cve_id = cve.get("id", "")
+            if not cve_id:
+                continue
+            descriptions = cve.get("descriptions", [])
+            desc = descriptions[0].get("value", "") if descriptions else ""
+            url = f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+            results.append(SearchResult(title=f"{cve_id}: {desc[:60]}...", url=url, description=desc[:300],
+                                        source="nvd", confidence=w * 1.3))
+        return results
+
+    def _parse_github_issues(self, data, w):
+        results = []
+        for item in data.get("items", []):
+            title = item.get("title", "")
+            url = item.get("html_url", "")
+            if not url:
+                continue
+            body = (item.get("body", "") or "")[:250].replace("\r\n", " ").replace("\n", " ")
+            results.append(SearchResult(title=f"Issue: {title}", url=url, description=body,
+                                        source="github_issues", confidence=w * 1.15))
+        return results
+
+    # ── Wikimedia Sister Project Parsers ─────────────────────────────
+
+    def _parse_mediawiki_generic(self, data, w, domain, source_name):
+        results = []
+        for r in data.get("query", {}).get("search", []):
+            title = r.get("title", "")
+            if not title:
+                continue
+            url = f"https://{domain}/wiki/{title.replace(' ', '_')}"
+            snippet = re.sub(r"<.*?>", "", r.get("snippet", ""))
+            results.append(SearchResult(
+                title=title, url=url, description=snippet,
+                source=source_name, confidence=w
+            ))
+        return results
+
+    def _parse_wikibooks(self, data, w):
+        return self._parse_mediawiki_generic(data, w, "en.wikibooks.org", "wikibooks")
+
+    def _parse_wikiversity(self, data, w):
+        return self._parse_mediawiki_generic(data, w, "en.wikiversity.org", "wikiversity")
+
+    def _parse_wikisource(self, data, w):
+        return self._parse_mediawiki_generic(data, w, "en.wikisource.org", "wikisource")
+
+    def _parse_wikidata(self, data, w):
+        return self._parse_mediawiki_generic(data, w, "www.wikidata.org", "wikidata")
+
+    # ── GitLab, DOAJ & PyPI Parsers ───────────────────────────────────
+
+    def _parse_gitlab(self, data, w):
+        results = []
+        if isinstance(data, list):
+            for p in data:
+                name = p.get("name_with_namespace", "")
+                url = p.get("web_url", "")
+                desc = p.get("description", "") or f"GitLab project {name}"
+                results.append(SearchResult(title=name, url=url, description=desc[:250],
+                                            source="gitlab", confidence=w * 1.15))
+        return results
+
+    def _parse_doaj(self, data, w):
+        results = []
+        for r in data.get("results", []):
+            bibjson = r.get("bibjson", {})
+            title = bibjson.get("title", "")
+            if not title:
+                continue
+            links = bibjson.get("link", [])
+            url = links[0].get("url", "") if links else ""
+            desc = bibjson.get("abstract", "") or f"Published in {bibjson.get('journal', {}).get('title', 'DOAJ')}"
+            results.append(SearchResult(title=title, url=url, description=desc[:300],
+                                        source="doaj", confidence=w * 1.25))
+        return results
+
+    def _parse_pypi(self, data, w):
+        results = []
+        info = data.get("info", {})
+        name = info.get("name", "")
+        if name:
+            url = info.get("project_url") or info.get("package_url") or f"https://pypi.org/project/{name}/"
+            desc = info.get("summary", "") or f"PyPI package {name} v{info.get('version', '')}"
+            results.append(SearchResult(
+                title=f"{name} (v{info.get('version', '')})",
+                url=url, description=desc[:250],
+                source="pypi", confidence=w * 1.2
+            ))
         return results

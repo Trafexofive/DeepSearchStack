@@ -40,27 +40,40 @@ ARTIFACT_PATTERNS = {
 
 # Domain baseline authority weights (0.0 to 1.0)
 HIGH_AUTHORITY_DOMAINS = {
-    "wikipedia.org": 0.95,
-    "github.com": 0.92,
-    "arxiv.org": 0.92,
-    "usenix.org": 0.95,
+    "nvd.nist.gov": 0.98,
+    "datatracker.ietf.org": 0.98,
     "rfc-editor.org": 0.98,
+    "developer.mozilla.org": 0.95,
+    "wikipedia.org": 0.95,
+    "usenix.org": 0.95,
     "ietf.org": 0.95,
-    "w3.org": 0.92,
+    "arxiv.org": 0.92,
+    "openalex.org": 0.92,
+    "wiki.archlinux.org": 0.92,
+    "github.com": 0.92,
+    "crates.io": 0.90,
+    "npmjs.com": 0.88,
     "stackoverflow.com": 0.88,
     "stackexchange.com": 0.85,
     "news.ycombinator.com": 0.85,
-    "developer.mozilla.org": 0.92,
 }
 
 # Default provider weights for RRF
 PROVIDER_WEIGHTS = {
+    "nvd": 1.3,
     "pubmed": 1.3,
+    "openalex": 1.25,
+    "ietf": 1.25,
     "arxiv": 1.25,
     "wikipedia": 1.2,
     "crossref": 1.2,
+    "crates": 1.2,
+    "mdn": 1.2,
     "stackexchange": 1.2,
     "github": 1.15,
+    "github_issues": 1.15,
+    "archwiki": 1.15,
+    "npm": 1.15,
     "hackernews": 1.1,
     "duckduckgo": 1.1,
     "searxng": 1.0,
@@ -129,6 +142,7 @@ class ResultRanker:
         query: str,
         provider_results: List[Tuple[str, List[SearchResult]]],
         sort_method: SortMethod = SortMethod.RELEVANCE,
+        offset: int = 0,
         max_results: int = 15,
     ) -> List[SearchResult]:
         """Fuse and rank results from multiple search providers using RRF and Consensus."""
@@ -229,9 +243,9 @@ class ResultRanker:
             scored_items.sort(key=lambda x: x.confidence, reverse=True)
 
         # Step 5: Assign rank numbers
-        final_list = scored_items[:max_results]
+        final_list = scored_items[offset:offset + max_results]
         for idx, item in enumerate(final_list):
-            item.rank = idx + 1
+            item.rank = offset + idx + 1
 
         return final_list
 

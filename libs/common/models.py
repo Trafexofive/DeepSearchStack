@@ -19,10 +19,25 @@ class SearchProvider(str, Enum):
     HACKERNEWS = "hackernews"
     PUBMED = "pubmed"
     GITHUB = "github"
+    GITHUB_ISSUES = "github_issues"
     INTERNET_ARCHIVE = "internetarchive"
     REDDIT = "reddit"
     CROSSREF = "crossref"
-    CUSTOM = "custom"
+    OPENALEX = "openalex"
+    MDN = "mdn"
+    ARCHWIKI = "archwiki"
+    CRATES_IO = "crates"
+    NPM = "npm"
+    IETF = "ietf"
+    NVD = "nvd"
+    WIKIBOOKS = "wikibooks"
+    WIKIVERSITY = "wikiversity"
+    WIKISOURCE = "wikisource"
+    WIKIDATA = "wikidata"
+    GITLAB = "gitlab"
+    DOAJ = "doaj"
+    PYPI = "pypi"
+    CUSTOM = "custom"  
 
 
 class SortMethod(str, Enum):
@@ -48,6 +63,7 @@ class SearchGatewayRequest(BaseModel):
     query: str
     providers: Optional[List[SearchProvider]] = None
     domain: Optional[str] = None
+    offset: int = 0
     max_results: int = 10
     sort_by: SortMethod = SortMethod.RELEVANCE
     timeout: float = 15.0

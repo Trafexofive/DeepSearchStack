@@ -422,20 +422,23 @@ def _resolve_aggregate_providers() -> List[str]:
 
 _AGGREGATE_PROVIDERS = _resolve_aggregate_providers()
 
-async def _multi_provider_search(query: str, max_results: int) -> List[dict]:
-    """Query ALL search providers via search-gateway with deadline."""
+async def _multi_provider_search(query: str, max_results: int, domain: Optional[str] = None, offset: int = 0, providers: Optional[List[str]] = None) -> List[dict]:
+    """Query search providers via search-gateway with dynamic presets, pagination, and intent routing."""
     try:
-        # 12s deadline - return whatever we have by then
+        payload = {
+            "query": query,
+            "max_results": max_results,
+            "offset": offset,
+            "timeout": 10,
+        }
+        if providers:
+            payload["providers"] = providers
+        elif domain:
+            payload["domain"] = domain
+        # If neither is passed, gateway automatically runs its 24-provider intent router!
+
         async with _shared_client(timeout=12.0) as client:
-            resp = await client.post(
-                f"{SEARCH_GATEWAY_URL}/search",
-                json={
-                    "query": query,
-                    "providers": _AGGREGATE_PROVIDERS,
-                    "max_results": max_results,
-                    "timeout": 10,
-                },
-            )
+            resp = await client.post(f"{SEARCH_GATEWAY_URL}/search", json=payload)
             resp.raise_for_status()
             return resp.json()
     except Exception as e:
@@ -1094,7 +1097,7 @@ async def cross_domain_aggregate(req: AggregateRequest):
         search_results = []
     else:
         metrics.incr("aggregate.external_searches")
-        search_results = await _multi_provider_search(req.query, req.max_results)
+        search_results = await _multi_provider_search(req.query, req.max_results, domain=getattr(req, 'domain', None), offset=getattr(req, 'offset', 0))
 
     # 4. Merge + domain-tag + deduplicate (warehouse + vector + external)
     seen_urls = set()
