@@ -432,3 +432,41 @@ def normalize_url(url: str) -> str:
     # Strip trailing slash from path (but keep root)
     path = parts.path.rstrip("/") if parts.path != "/" else "/"
     return urlunsplit((scheme, netloc, path, query, ""))
+
+
+# ── 64-bit Locality Sensitive Hashing (SimHash) for Near-Dedup ──────────────
+
+def compute_simhash(text: str) -> int:
+    """Compute a 64-bit SimHash fingerprint of the text.
+    Sub-millisecond, pure Python, zero external dependencies.
+    """
+    import re
+    import hashlib
+    
+    tokens = re.findall(r"\w+", text.lower())
+    if not tokens:
+        return 0
+        
+    v = [0] * 64
+    for token in tokens:
+        # 64-bit hash of token
+        h = int(hashlib.md5(token.encode("utf-8")).hexdigest()[:16], 16)
+        for i in range(64):
+            bit = (h >> i) & 1
+            v[i] += 1 if bit else -1
+            
+    fingerprint = 0
+    for i in range(64):
+        if v[i] > 0:
+            fingerprint |= (1 << i)
+    return fingerprint
+
+def hamming_distance(hash1: int, hash2: int) -> int:
+    """Compute bitwise Hamming distance between two 64-bit fingerprints."""
+    x = (hash1 ^ hash2) & 0xFFFFFFFFFFFFFFFF
+    # Brian Kernighan bit-count
+    count = 0
+    while x:
+        x &= x - 1
+        count += 1
+    return count

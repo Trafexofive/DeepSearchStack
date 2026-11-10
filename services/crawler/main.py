@@ -286,37 +286,47 @@ def _should_skip_fast(domain: str) -> bool:
     return html_stats.get("fail", 0) >= DOMAIN_STRATEGY_FAIL_THRESHOLD
 
 
+_warehouse_http_client = None
+
+def _get_warehouse_client():
+    global _warehouse_http_client
+    if _warehouse_http_client is None or _warehouse_http_client.is_closed:
+        import httpx
+        _warehouse_http_client = httpx.AsyncClient(
+            timeout=15.0,
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+        )
+    return _warehouse_http_client
+
+_warehouse_http_client = None
+
+def _get_warehouse_client():
+    global _warehouse_http_client
+    if _warehouse_http_client is None or _warehouse_http_client.is_closed:
+        import httpx
+        _warehouse_http_client = httpx.AsyncClient(
+            timeout=15.0,
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+        )
+    return _warehouse_http_client
+
 async def _forward_to_warehouse(**payload) -> bool:
-    """Forward content to warehouse with 3 retries, exponential backoff."""
-    import httpx
+    """Forward content to warehouse with connection pooling and exponential backoff."""
     max_retries = 3
+    client = _get_warehouse_client()
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(f"{WAREHOUSE_URL}/ingest", json=payload)
-                if resp.status_code == 200:
-                    return True
-                log.warning("warehouse_forward_fail attempt=%d/%d status=%d url=%s",
-                           attempt + 1, max_retries, resp.status_code, payload.get("url", "")[:120])
+            resp = await client.post(f"{WAREHOUSE_URL}/ingest", json=payload)
+            if resp.status_code == 200:
+                return True
+            log.warning("warehouse_forward_fail attempt=%d/%d status=%d url=%s",
+                        attempt + 1, max_retries, resp.status_code, payload.get("url", "")[:80])
         except Exception as e:
-            log.warning("warehouse_forward_error attempt=%d/%d url=%s: %s",
-                       attempt + 1, max_retries, payload.get("url", "")[:120], str(e))
-        if attempt < max_retries - 1:
-            await asyncio.sleep(2 ** attempt)  # 1s, 2s, 4s
+            log.warning("warehouse_forward_error attempt=%d/%d err=%s url=%s",
+                        attempt + 1, max_retries, e, payload.get("url", "")[:80])
+        await asyncio.sleep(0.3 * (2 ** attempt))
     return False
 
-def _store_pending_forward(**payload):
-    """Store failed forward in persistent queue for background retry."""
-    with _connect_db(_PENDING_FORWARD_DB) as conn:
-        conn.execute("""
-            INSERT INTO pending_forwards (url, markdown, content, title, source_domain, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            payload.get("url", ""), payload.get("markdown", ""),
-            payload.get("content", ""), payload.get("title", ""),
-            payload.get("source_domain", ""), time.time(),
-        ))
-        conn.commit()
 
 async def _retry_pending_forwards():
     """Background task: retry pending warehouse forwards every 60s."""

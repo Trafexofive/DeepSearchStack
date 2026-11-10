@@ -1,3 +1,4 @@
+from libs.common.text import compute_simhash, hamming_distance
 """Knowledge Warehouse — persistent content repository for crawled pages.
 
 Receives content from the crawler service, stores in SQLite with full-text search.
@@ -95,24 +96,31 @@ def _quality_gate_decide(
     *, word_count: int, extraction_confidence: Optional[float],
     category: Optional[str], markdown: str,
 ) -> Optional[str]:
-    """Return None to allow ingest, or a short rejection reason string."""
-    gate = QUALITY_GATE
+    """Return None to allow ingest, or a short rejection reason string.
+    Upgraded: understands epistemic density (code blocks, specs, technical tokens)."""
+    gate = getattr(QUALITY_GATE, "copy", lambda: QUALITY_GATE)() if isinstance(QUALITY_GATE, dict) else {}
     if not gate.get("enabled", True):
         return None
 
-    # Per-category overrides (e.g. code:30 words instead of 150).
-    overrides = (gate.get("per_category") or {}).get(category) or {}
+    # Check for dense technical content (code blocks, shell, configs)
+    has_code_block = "```" in markdown or "`" in markdown
+    has_tech_tokens = any(kw in markdown for kw in ["def ", "fn ", "impl ", "class ", "import ", "const ", "struct ", "SELECT ", "curl "])
+    is_dense_technical = has_code_block or has_tech_tokens or (category in ("code", "manual", "doc", "qa"))
 
-    min_wc = overrides.get("min_word_count", gate.get("min_word_count", 150))
+    if is_dense_technical:
+        min_wc = 15  # concise code snippets and bug reports are valid
+    else:
+        overrides = (gate.get("per_category") or {}).get(category) or {}
+        min_wc = overrides.get("min_word_count", 40)  # relaxed default from 150 to 40
+
     if word_count < min_wc:
         return f"word_count:{word_count}<{min_wc}"
 
-    min_conf = overrides.get("min_extraction_confidence",
-                             gate.get("min_extraction_confidence", 0.30))
-    if extraction_confidence is not None and extraction_confidence < min_conf:
+    min_conf = (gate.get("per_category") or {}).get(category, {}).get("min_extraction_confidence", 0.20)
+    if extraction_confidence is not None and extraction_confidence < min_conf and not is_dense_technical:
         return f"confidence:{extraction_confidence:.2f}<{min_conf}"
 
-    if gate.get("reject_nav_dumps", True) and _nav_dump_score(markdown):
+    if gate.get("reject_nav_dumps", True) and not is_dense_technical and _nav_dump_score(markdown):
         return "nav_dump"
 
     return None
@@ -382,7 +390,13 @@ def _init_db():
                 VALUES ('delete', old.id, old.title, old.markdown, old.content, old.url, old.author);
             END
         """)
-        conn.commit()
+            # Ensure simhash column exists for near-duplicate detection
+    try:
+        conn.execute("ALTER TABLE content ADD COLUMN simhash TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_content_simhash ON content(simhash)")
+    except Exception:
+        pass  # column already exists
+    conn.commit()
 
 
 _init_db()
@@ -1528,6 +1542,35 @@ async def ingest(req: IngestRequest):
                 content_sha256=content_sha, superseded_id=prior_id,
             )
 
+        
+        # Step 2.5: Near-duplicate check via 64-bit SimHash (Hamming distance <= 3)
+        sim_h_int = compute_simhash(md)
+        sim_h = f"{sim_h_int:016x}" if sim_h_int != 0 else None
+        if sim_h is not None:
+            # Check active rows for near-matches
+            candidates = conn.execute(
+                "SELECT id, url, simhash FROM content WHERE is_current = 1 AND simhash IS NOT NULL LIMIT 500"
+            ).fetchall()
+            sim_int = int(sim_h, 16)
+            for cand_id, cand_url, cand_h in candidates:
+                if cand_h:
+                    cand_int = int(cand_h, 16) if isinstance(cand_h, str) else cand_h
+                    if hamming_distance(sim_int, cand_int) <= 3:
+                        dist = hamming_distance(sim_int, cand_int)
+                        log.info("ingest_near_duplicate url=%s matches canonical_id=%d url=%s distance=%d",
+                                 req.url[:80], cand_id, cand_url[:80], dist)
+                        conn.execute("UPDATE content SET last_seen_at = ? WHERE id = ?", (now, cand_id))
+                        try:
+                            conn.execute(
+                                "INSERT OR IGNORE INTO content_alias (content_id, url, first_seen) VALUES (?, ?, ?)",
+                                (cand_id, req.url, now)
+                            )
+                        except Exception: pass
+                        return IngestResponse(
+                            id=cand_id, url=req.url, ingested=True, cached=True,
+                            action="alias", content_sha256=content_sha
+                        )
+
         # Step 3: brand new
         cursor = conn.execute(
             """
@@ -1536,15 +1579,15 @@ async def ingest(req: IngestRequest):
                 word_count, source_domain, ingested_at, last_seen_at, tags,
                 content_sha256, revision, is_current, supersedes,
                 seen_in_session, found_via_query, extractor, extraction_confidence,
-                source_provider, status, category
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, NULL, ?, ?, ?, ?, ?, 'active', ?)
+                source_provider, status, category, simhash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, NULL, ?, ?, ?, ?, ?, 'active', ?, ?)
             """,
             (
                 url_hash, req.url, req.title, md, content, req.author, req.published, req.language,
                 req.word_count, domain, now, now, json.dumps(req.tags),
                 content_sha,
                 req.seen_in_session, req.found_via_query, req.extractor,
-                req.extraction_confidence, req.source_provider, category,
+                req.extraction_confidence, req.source_provider, category, sim_h,
             ),
         )
         row_id = cursor.lastrowid
