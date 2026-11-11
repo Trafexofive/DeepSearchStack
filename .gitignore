@@ -127,3 +127,4 @@ services/searxng/full-aggregation.yml
 
 clients/cli-go/dss
 clients/tui-go/dss-tui
+build/
